@@ -1,0 +1,41 @@
+---
+description: Organized, iteration-friendly codebase that scales and hands off cleanly
+alwaysApply: true
+---
+
+# Codebase organization
+
+Build so work moves fast **now** and a professional team can take over **later** without a rewrite.
+
+## Structure
+
+- Follow the established layout — do not invent parallel patterns:
+  - `frontend/src/` — UI, pages, components, hooks
+  - `backend/src/api/` — routes only; thin handlers
+  - `backend/src/services/` — business logic
+  - `backend/src/scrapers/{supplier}/` — one folder per supplier
+  - `backend/src/workers/` — background jobs
+  - `backend/supabase/migrations/` — schema changes only here
+- New features go in the **correct layer** on day one — no "temporary" files in random places.
+- Add a short `README.md` when creating a new top-level module (what it does, main entry file).
+
+## Iteration-friendly, handover-ready
+
+- **Small, focused changes** — one feature or fix per task; easy to review.
+- **Obvious entry points** — `main`, route files, worker registrars, scraper registry. No hunting.
+- **Config in env** — URLs, keys, feature flags via `.env.example`; never hardcode secrets or supplier URLs in logic.
+- **Types at boundaries** — API request/response, DB rows, scraper output, LLM tool params.
+- **Consistent patterns** — if one scraper uses `parser.ts` + `adapter.ts`, the next one does too.
+- **No prototype debt** — skip shortcuts that block scale (god files, inline SQL in routes, copy-paste adapters).
+
+## Documentation sync
+
+- If structure or flows change, update the matching file in `.cursor/docs/`.
+- New env vars → document in `.env.example` with a one-line comment.
+
+## Before merging work
+
+- [ ] New code is in the right folder, not bolted on
+- [ ] A new developer could run the app from README + `.env.example`
+- [ ] No orphaned files, duplicate utilities, or unexplained `utils/misc.ts`
+- [ ] Architecture docs still match reality (or were updated)

@@ -1,0 +1,45 @@
+---
+description: Clean, modular code and clear naming — required for all changes
+alwaysApply: true
+---
+
+# Coding standards
+
+Every change must be **clean**, **modular**, and **easy to navigate**. Prefer clarity over cleverness.
+
+## Modularity
+
+- **One responsibility per file** — split when a file handles unrelated concerns.
+- **One responsibility per function** — short, named for what it does.
+- **Extract reusable logic** into `services/`, `utils/`, or `hooks/` — do not duplicate.
+- **Keep layers separate**: UI ≠ API routes ≠ business logic ≠ DB access ≠ scrapers.
+- **Limit file size** — if a file exceeds ~200 lines, consider splitting by responsibility.
+
+## File and folder names
+
+- Use **kebab-case** for files and folders: `search-products.ts`, `live-check-worker.ts`.
+- Names must **describe contents**, not implementation: `product-card.tsx` not `card2.tsx`.
+- Match domain language: `henry-schein/`, `supplier-products`, `price-history`.
+- Colocate related code: `scrapers/adam-dental/parser.ts`, not one giant `scrapers.ts`.
+- Index/barrel files (`index.ts`) only for **public exports** of a module — not a junk drawer.
+
+## Code clarity
+
+- **Explicit types** on public functions and API boundaries.
+- **No magic strings** — use constants or enums for statuses, job types, supplier slugs.
+- **Early returns** over deep nesting.
+- **Comments** only for non-obvious business rules — code should read self-explanatory.
+- **No dead code**, commented-out blocks, or unused imports.
+
+## Dependencies
+
+- Inject or pass dependencies where it aids testing — avoid hidden globals.
+- Do not import across layers incorrectly (e.g. scrapers importing from UI).
+- Shared types live in a dedicated `types/` or `shared/` package — not copied.
+
+## Before finishing
+
+- [ ] File names make sense in isolation
+- [ ] New code lives in the right folder/layer
+- [ ] No unrelated changes bundled in
+- [ ] A new teammate could find this file without asking where it is

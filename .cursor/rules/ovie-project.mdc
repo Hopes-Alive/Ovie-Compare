@@ -1,0 +1,24 @@
+---
+description: Ovie domain conventions — suppliers, scraping, chat, retrieval
+alwaysApply: true
+---
+
+# Ovie project rules
+
+Before implementing features, read the relevant doc in `.cursor/docs/`:
+
+- Scraping → `scraping.md`
+- Database → `database-schema.md`
+- Chat/retrieval → `retrieval-chat.md`
+- Frontend pages → `page-structure.md`
+- API → `api.md`
+- Admin → `admin.md`
+
+## Domain conventions
+
+- MVP suppliers: `henry-schein`, `adam-dental`
+- One scraper adapter per supplier in `backend/src/scrapers/{slug}/`
+- LLM uses typed tools only — no raw SQL, no arbitrary URLs
+- Hybrid retrieval: structured + FTS + vector (not vector-only)
+- Playwright runs in workers only, not API handlers
+- Answers must be grounded in `supplier_products` with timestamps

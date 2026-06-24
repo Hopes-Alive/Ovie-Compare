@@ -1,0 +1,42 @@
+---
+description: Prefer established third-party libraries and components over custom implementations
+alwaysApply: true
+---
+
+# Use third-party libraries
+
+Do not build from scratch when a **maintained library or component** solves the problem well. Favor proven modules over custom code.
+
+## UI and frontend
+
+- Use a component library: **shadcn/ui** (Radix + Tailwind), or similar — not hand-rolled buttons, modals, tables, forms.
+- Use established packages for common UI: `qrcode.react`, `lucide-react` (icons), `react-hook-form` + `zod` (forms), `@tanstack/react-table` (tables).
+- Copy/adapt **official docs examples** and shadcn CLI snippets before writing custom markup.
+- Tailwind for layout/styling — avoid large custom CSS files unless necessary.
+
+## Backend and tooling
+
+- **Playwright** for scraping — not raw fetch hacks when JS rendering is needed.
+- **BullMQ** for job queues — not a custom queue.
+- **Supabase client** for DB — not raw SQL strings in routes.
+- **OpenAI / Anthropic SDKs** for LLM — not hand-rolled HTTP clients.
+- Use `zod` for validation, `date-fns` for dates, etc. — check npm before writing utilities.
+
+## When to write custom code
+
+- Supplier-specific scraper adapters (domain logic — no off-the-shelf package).
+- Business rules unique to Ovie (retrieval merge, freshness logic).
+- Thin wrappers that connect third-party pieces to our types.
+
+## Before implementing
+
+1. Search for an established package or official snippet for the task.
+2. Prefer packages with good docs, active maintenance, and TypeScript support.
+3. Match versions already in the project — do not add duplicate libraries for the same job.
+4. Pin in `package.json`; document new deps in the module README if non-obvious.
+
+## Avoid
+
+- Custom modal, dropdown, toast, or data-table from divs + useState.
+- Reimplementing auth, QR, SSE, or form validation when a standard lib exists.
+- Copy-pasting large blocks from random blogs — prefer **official docs** and **shadcn/ui** registry.
