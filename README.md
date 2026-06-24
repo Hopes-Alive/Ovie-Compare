@@ -1,14 +1,21 @@
-# Ovie — Dental Supplier Comparison
+# Ovie Compare
 
 AI chatbot for comparing dental products across suppliers (Henry Schein, Adam Dental).
 
 ## Structure
 
 ```
-frontend/     Chat UI, admin dashboard, public landing
-backend/      API, workers, scrapers, database migrations
-.cursor/docs/ Detailed planning notes per area
+frontend/     Next.js — landing, chat, admin
+backend/      API, workers, scrapers
+backend/supabase/migrations/   SQL schema
+.cursor/docs/ Planning notes
 ```
+
+## Quick start
+
+1. **Database** — run `backend/supabase/migrations/001_initial_schema.sql` in [Supabase SQL Editor](https://supabase.com/dashboard)
+2. **Frontend** — `cd frontend && cp .env.example .env.local` (add keys) && `npm run dev`
+3. Open http://localhost:3000
 
 ## MVP suppliers
 
@@ -17,4 +24,4 @@ backend/      API, workers, scrapers, database migrations
 
 ## Docs
 
-See [.cursor/docs/](.cursor/docs/) for architecture, scraping, pages, schema, and retrieval design.
+See [.cursor/docs/](.cursor/docs/) for architecture, scraping, retrieval, and API design.

@@ -69,7 +69,7 @@ One row per product per supplier. Main table for search and chat.
 | category | text | MVP: text; later FK to categories |
 | subcategory | text | |
 | description | text | |
-| image_url | text | |
+| image_src | text | Comma-separated image URLs; first is primary |
 | pack_size | text | e.g. "100 pack" |
 | unit_of_measure | text | |
 | price | numeric(12,2) | |
