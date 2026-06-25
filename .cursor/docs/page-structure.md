@@ -7,6 +7,7 @@ Next.js app routes, layouts, and key UI components.
 ```
 /                          Public landing
 /chat                      Chatbot (main product)
+/demo                      Demo hub (internal — organise stakeholder walkthrough)
 /admin                     Admin dashboard (auth required)
 /admin/suppliers           Data sources + scrape health
 /admin/analytics           Usage metrics
@@ -232,6 +233,8 @@ frontend/src/components/
   landing/
     QrCodeCard.tsx
     ChatUrlActions.tsx
+  demo/
+    DemoPageContent.tsx
   admin/
     AdminLayout.tsx
     Sidebar.tsx

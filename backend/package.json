@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "test:scrape": "tsx src/scripts/test-scrape.ts",
+    "test:scrape:adam-dental": "tsx src/scripts/test-scrape.ts --supplier adam-dental",
     "discover:henry-schein": "tsx src/scripts/discover-categories.ts",
     "seed:henry-schein": "tsx src/scripts/seed-henry-schein.ts",
+    "discover:adam-dental": "tsx src/scripts/discover-adam-dental-categories.ts",
+    "seed:adam-dental": "tsx src/scripts/seed-adam-dental.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

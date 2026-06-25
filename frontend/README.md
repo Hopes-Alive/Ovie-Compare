@@ -31,4 +31,12 @@ Open http://localhost:3000 — home page shows database connection status.
 | Route | Status |
 |-------|--------|
 | `/` | Landing + DB status |
-| `/chat` | Placeholder |
+| `/chat` | Chat UI (demo thread + interactive input stub) |
+| `/demo` | Demo hub — organise stakeholder walkthrough |
+| `/admin` | Admin overview |
+| `/admin/suppliers` | Connected suppliers table |
+| `/admin/analytics` | Usage metrics |
+| `/admin/jobs` | Scrape & live-check logs |
+| `/admin/architecture` | System diagram |
+
+Admin and chat pages use mock data under `src/data/mock/` until API routes are wired.

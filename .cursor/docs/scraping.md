@@ -38,8 +38,11 @@ How we ingest and refresh product data from Henry Schein and Adam Dental.
 ### Adam Dental
 
 - Search: `https://www.adamdental.com.au/search?ProductSearch={query}`
-- Public prices on search (verified)
-- Note: some products may be restricted (APHRA) — parser should flag `login_required` in metadata
+- **Same platform as Henry Schein** — `window.products` injection with identical fields
+- Prices: `window.products.PriceForOneInc` shows "Call us!" for logged-out users, but `data-product-data` attribute on each card has `NettPriceFromFirstInc` / `NettPriceFromFirstEx` with the real public price
+- APHRA-restricted products: `NettPriceFromFirstInc` will also be "Call us!" → parser sets `metadata.login_required = true` and stores the product without a price
+- Pagination: "Show More Products" AJAX button (`button.cv-refresh`), no URL-based pages
+- 460 leaf categories discovered (stored in `data/adam-dental-categories.json`)
 
 ---
 
