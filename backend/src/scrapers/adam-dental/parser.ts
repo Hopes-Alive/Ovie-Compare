@@ -22,7 +22,7 @@ interface RawProductData {
   NettPriceFromFirstInc?: string;
   NettPriceFromFirstEx?: string;
   ImageFileName?: string;
-  AvailableQty?: number;
+  AvailableQty?: number | null;
   AllowOrderEntryForProduct?: boolean;
 }
 
@@ -63,9 +63,10 @@ function cleanBrand(raw: string | undefined | null): string | undefined {
 }
 
 const CARTON_X_PATTERN = /\bCarton\s+(\d+)\s*x\s*(\d+)\b|\b(\d+)\s*x\s*(\d+)\b/i;
-const DASH_PACK_PATTERN = /\b(\d+)[-\s]Pack\b/i;
+const DASH_PACK_PATTERN = /\b(\d+)[-\s]Pack\b|\bPack\s+of\s+(\d+)\b/i;
 const BOX_OF_PATTERN = /\b(?:box|carton)\s+of\s+(\d+)\b/i;
-const SLASH_PK_PATTERN = /(\d+)\s*\/\s*(?:pk|box|bx|carton|ctn)\b/i;
+const SLASH_UNIT_PATTERN = /\b(\d+)\s*\/\s*(?:pk|box|bx|carton|ctn|pack)\b/i;
+const SHORT_PK_PATTERN = /\b(\d+)\s*(?:pk|pcs?|pieces?)\b/i;
 
 function extractPackSize(name: string): string | undefined {
   const carton = name.match(CARTON_X_PATTERN);
@@ -75,11 +76,13 @@ function extractPackSize(name: string): string | undefined {
     return `${a} x ${b}`;
   }
   const dashPack = name.match(DASH_PACK_PATTERN);
-  if (dashPack) return dashPack[1];
+  if (dashPack) return dashPack[1] ?? dashPack[2];
   const boxOf = name.match(BOX_OF_PATTERN);
   if (boxOf) return boxOf[1];
-  const slashPk = name.match(SLASH_PK_PATTERN);
-  if (slashPk) return slashPk[1];
+  const slashUnit = name.match(SLASH_UNIT_PATTERN);
+  if (slashUnit) return slashUnit[1];
+  const shortPk = name.match(SHORT_PK_PATTERN);
+  if (shortPk) return shortPk[1];
   return undefined;
 }
 
@@ -223,12 +226,25 @@ export async function parsePageProducts(page: Page): Promise<ProductDetail[]> {
       const priceInc = cleanPrice(pricingData?.NettPriceFromFirstInc);
       const priceEx = cleanPrice(pricingData?.NettPriceFromFirstEx);
 
-      // Detect APHRA / login-required products
+      // A product is login-required when:
+      //   1. No public price could be extracted, AND
+      //   2. The window.products price is "Call us!" / "login" (APHRA-restricted or members-only), OR
+      //   3. No data-product-data element exists at all for this SKU
+      const windowPriceRaw = (item.PriceForOneInc ?? "").toLowerCase();
+      const isWindowPriceRestricted =
+        windowPriceRaw.includes("call") || windowPriceRaw.includes("login") || windowPriceRaw === "";
       const isLoginRequired =
         priceInc === undefined &&
-        (pricingData?.NettPriceFromFirstInc?.toLowerCase().includes("call") ||
-          pricingData?.NettPriceFromFirstInc?.toLowerCase().includes("login") ||
-          !pricingData);
+        (isWindowPriceRestricted || !pricingData);
+
+      // Stock status: use AvailableQty from DOM pricing data when present
+      const qty = pricingData?.AvailableQty;
+      const stockStatus: ProductDetail["stockStatus"] =
+        qty != null
+          ? qty > 0
+            ? "in_stock"
+            : "out_of_stock"
+          : "unknown";
 
       const rawUrl = domLinks.get(sku) ?? domLinks.get(item.ProductCode!);
       const productUrl = rawUrl
@@ -248,7 +264,7 @@ export async function parsePageProducts(page: Page): Promise<ProductDetail[]> {
         brand: extractBrand(item.BrandText, name),
         price: priceInc,
         priceExGst: priceEx,
-        stockStatus: "in_stock",
+        stockStatus,
         url: productUrl,
         imageSrc: imageUrl,
         category,
@@ -257,6 +273,7 @@ export async function parsePageProducts(page: Page): Promise<ProductDetail[]> {
         raw: {
           ...item,
           login_required: isLoginRequired,
+          available_qty: qty ?? null,
         } as unknown as Record<string, unknown>,
       };
     });

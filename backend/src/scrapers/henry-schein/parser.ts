@@ -52,12 +52,16 @@ function cleanBrand(raw: string | undefined | null): string | undefined {
   return t;
 }
 
-// Match "Carton 10 x 100" or "10 x 100"
+// "Carton 10 x 100" or "10 x 100"
 const CARTON_X_PATTERN = /\bCarton\s+(\d+)\s*x\s*(\d+)\b|\b(\d+)\s*x\s*(\d+)\b/i;
-// Match "200-Pack", "100 Pack", "100-pack"
-const DASH_PACK_PATTERN = /\b(\d+)[-\s]Pack\b/i;
-// Match generic "Box of 10", "Carton of 10"
+// "200-Pack", "100 Pack", "100-pack", "Pack of 100"
+const DASH_PACK_PATTERN = /\b(\d+)[-\s]Pack\b|\bPack\s+of\s+(\d+)\b/i;
+// "Box of 10", "Carton of 10"
 const BOX_OF_PATTERN = /\b(?:box|carton)\s+of\s+(\d+)\b/i;
+// "200pk", "10pc", "5pcs", "10 pieces"
+const SHORT_PK_PATTERN = /\b(\d+)\s*(?:pk|pcs?|pieces?)\b/i;
+// "10/Box", "50/Pk", "12/Carton"
+const SLASH_UNIT_PATTERN = /\b(\d+)\s*\/\s*(?:pk|box|bx|carton|ctn|pack)\b/i;
 
 function extractPackSize(name: string): string | undefined {
   const carton = name.match(CARTON_X_PATTERN);
@@ -67,9 +71,13 @@ function extractPackSize(name: string): string | undefined {
     return `${a} x ${b}`;
   }
   const dashPack = name.match(DASH_PACK_PATTERN);
-  if (dashPack) return dashPack[1];
+  if (dashPack) return dashPack[1] ?? dashPack[2];
   const boxOf = name.match(BOX_OF_PATTERN);
   if (boxOf) return boxOf[1];
+  const slashUnit = name.match(SLASH_UNIT_PATTERN);
+  if (slashUnit) return slashUnit[1];
+  const shortPk = name.match(SHORT_PK_PATTERN);
+  if (shortPk) return shortPk[1];
   return undefined;
 }
 

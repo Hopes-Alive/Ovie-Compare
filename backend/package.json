@@ -10,12 +10,21 @@
     "seed:henry-schein": "tsx src/scripts/seed-henry-schein.ts",
     "discover:adam-dental": "tsx src/scripts/discover-adam-dental-categories.ts",
     "seed:adam-dental": "tsx src/scripts/seed-adam-dental.ts",
+    "patch:brand-packsize": "tsx src/scripts/patch-brand-packsize.ts",
+    "reset-embeddings": "tsx src/scripts/reset-embeddings.ts",
+    "enrich": "tsx src/workers/enrich-product-details.ts",
+    "enrich:henry-schein": "tsx src/workers/enrich-product-details.ts --supplier henry-schein",
+    "enrich:adam-dental": "tsx src/workers/enrich-product-details.ts --supplier adam-dental",
+    "embed": "tsx src/workers/embedding-worker.ts",
+    "embed:henry-schein": "tsx src/workers/embedding-worker.ts --supplier henry-schein",
+    "embed:adam-dental": "tsx src/workers/embedding-worker.ts --supplier adam-dental",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@playwright/test": "^1.52.0",
     "@supabase/supabase-js": "^2.108.2",
     "dotenv": "^16.4.7",
+    "openai": "^6.45.0",
     "playwright": "^1.52.0"
   },
   "devDependencies": {
