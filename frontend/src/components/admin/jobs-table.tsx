@@ -9,6 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AdminTableCard } from "@/components/admin/shell/admin-table-card";
 import { cn } from "@/lib/utils";
 import type { LiveCheckJobSummary, ScrapeJobSummary } from "@/types/admin";
 
@@ -38,23 +39,27 @@ function statusVariant(status: "completed" | "running" | "failed") {
 }
 
 export function JobsTable(props: JobsTableProps) {
-  // TODO: replace with useAdminJobs()
-
   if (props.variant === "scrape") {
     const { jobs, selectedJobId, onSelectJob } = props;
     return (
-      <div className="rounded-xl border border-border bg-card">
+      <AdminTableCard>
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Started</TableHead>
-              <TableHead>Supplier</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Found</TableHead>
-              <TableHead className="text-right">Updated</TableHead>
-              <TableHead className="text-right">Failed</TableHead>
-              <TableHead>Duration</TableHead>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="text-[var(--admin-muted)]">Started</TableHead>
+              <TableHead className="text-[var(--admin-muted)]">Supplier</TableHead>
+              <TableHead className="text-[var(--admin-muted)]">Type</TableHead>
+              <TableHead className="text-[var(--admin-muted)]">Status</TableHead>
+              <TableHead className="text-right text-[var(--admin-muted)]">
+                Found
+              </TableHead>
+              <TableHead className="text-right text-[var(--admin-muted)]">
+                Updated
+              </TableHead>
+              <TableHead className="text-right text-[var(--admin-muted)]">
+                Failed
+              </TableHead>
+              <TableHead className="text-[var(--admin-muted)]">Duration</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -63,7 +68,8 @@ export function JobsTable(props: JobsTableProps) {
                 key={job.id}
                 className={cn(
                   onSelectJob && "cursor-pointer",
-                  selectedJobId === job.id && "bg-muted/50"
+                  selectedJobId === job.id && "bg-[var(--admin-sidebar-muted)]",
+                  "hover:bg-[var(--admin-bg)]/70"
                 )}
                 onClick={() => onSelectJob?.(job.id)}
               >
@@ -73,44 +79,52 @@ export function JobsTable(props: JobsTableProps) {
                 <TableCell>
                   <Badge variant={statusVariant(job.status)}>{job.status}</Badge>
                 </TableCell>
-                <TableCell className="text-right">{job.found}</TableCell>
-                <TableCell className="text-right">{job.updated}</TableCell>
-                <TableCell className="text-right">{job.failed}</TableCell>
+                <TableCell className="text-right tabular-nums">{job.found}</TableCell>
+                <TableCell className="text-right tabular-nums">{job.updated}</TableCell>
+                <TableCell className="text-right tabular-nums">{job.failed}</TableCell>
                 <TableCell>{job.duration}</TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
-      </div>
+      </AdminTableCard>
     );
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card">
+    <AdminTableCard>
       <Table>
         <TableHeader>
-          <TableRow>
-            <TableHead>Started</TableHead>
-            <TableHead className="text-right">Products</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="text-right">Changed</TableHead>
-            <TableHead>Duration</TableHead>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="text-[var(--admin-muted)]">Started</TableHead>
+            <TableHead className="text-right text-[var(--admin-muted)]">
+              Products
+            </TableHead>
+            <TableHead className="text-[var(--admin-muted)]">Status</TableHead>
+            <TableHead className="text-right text-[var(--admin-muted)]">
+              Changed
+            </TableHead>
+            <TableHead className="text-[var(--admin-muted)]">Duration</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {props.jobs.map((job) => (
-            <TableRow key={job.id}>
+            <TableRow key={job.id} className="hover:bg-[var(--admin-bg)]/70">
               <TableCell>{job.startedAt}</TableCell>
-              <TableCell className="text-right">{job.productCount}</TableCell>
+              <TableCell className="text-right tabular-nums">
+                {job.productCount}
+              </TableCell>
               <TableCell>
                 <Badge variant={statusVariant(job.status)}>{job.status}</Badge>
               </TableCell>
-              <TableCell className="text-right">{job.changedCount}</TableCell>
+              <TableCell className="text-right tabular-nums">
+                {job.changedCount}
+              </TableCell>
               <TableCell>{job.duration}</TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
-    </div>
+    </AdminTableCard>
   );
 }

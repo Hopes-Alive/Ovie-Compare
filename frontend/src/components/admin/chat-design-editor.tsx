@@ -28,6 +28,7 @@ import {
 import { ChatDesignSuggestedPromptsEditor } from "@/components/admin/chat-design-suggested-prompts-editor";
 import { ImageUploadField } from "@/components/admin/image-upload-field";
 import { SupplierLogosEditor } from "@/components/admin/supplier-logos-editor";
+import { AdminPageShell } from "@/components/admin/shell/admin-page-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -212,82 +213,82 @@ export function ChatDesignEditor() {
     return <ChatDesignEditorSkeleton />;
   }
 
+  const statusBadge = showSaveSuccess ? (
+    <Badge className="border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
+      Saved successfully
+    </Badge>
+  ) : isDirty ? (
+    <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">
+      Unsaved changes
+    </Badge>
+  ) : (
+    <Badge variant="secondary">Up to date</Badge>
+  );
+
+  const headerActions = (
+    <>
+      <Link
+        href={ROUTES.chat}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={buttonVariants({
+          variant: "ghost",
+          size: "sm",
+          className: "hidden sm:inline-flex",
+        })}
+      >
+        <ExternalLink className="size-4" />
+        View live chat
+      </Link>
+      {isDirty && (
+        <Button variant="ghost" size="sm" onClick={handleDiscardChanges}>
+          Discard
+        </Button>
+      )}
+      <Button variant="outline" size="sm" onClick={() => setResetDialogOpen(true)}>
+        <RotateCcw className="size-4" />
+        Reset defaults
+      </Button>
+      <Button size="sm" onClick={() => void handleSave()} disabled={saving || !isDirty}>
+        {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+        Save
+        <kbd className="ml-1.5 hidden rounded border border-primary-foreground/20 bg-primary-foreground/10 px-1.5 py-0.5 text-[10px] font-medium lg:inline">
+          ⌘S
+        </kbd>
+      </Button>
+    </>
+  );
+
+  const headerExtra = (
+    <>
+      <div className="mt-3">{statusBadge}</div>
+      <div className="mt-4 max-w-md">
+        <div className="mb-1.5 flex items-center justify-between text-xs">
+          <span className="font-medium text-[var(--admin-muted)]">Setup progress</span>
+          <span className="tabular-nums text-[var(--admin-muted)]">
+            {setupProgress.completed}/{setupProgress.total} complete
+          </span>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-[var(--admin-border)]">
+          <div
+            className="h-full rounded-full bg-[var(--admin-foreground)] transition-all duration-500 ease-out"
+            style={{ width: `${setupProgress.percent}%` }}
+          />
+        </div>
+      </div>
+    </>
+  );
+
   return (
     <>
-      <div className="-mx-1 pb-24 xl:pb-0">
-        <div className="sticky top-0 z-20 -mx-4 mb-6 border-b border-border/60 bg-zinc-50/95 px-4 py-4 backdrop-blur-md md:-mx-8 md:px-8">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-                  Chat Design
-                </h1>
-                {showSaveSuccess ? (
-                  <Badge className="border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-50">
-                    Saved successfully
-                  </Badge>
-                ) : isDirty ? (
-                  <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">
-                    Unsaved changes
-                  </Badge>
-                ) : (
-                  <Badge variant="secondary">Up to date</Badge>
-                )}
-              </div>
-              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-                Customize the chat page shell — header, backgrounds, supplier logos, and empty state.
-              </p>
-
-              <div className="mt-4 max-w-md">
-                <div className="mb-1.5 flex items-center justify-between text-xs">
-                  <span className="font-medium text-muted-foreground">Setup progress</span>
-                  <span className="tabular-nums text-muted-foreground">
-                    {setupProgress.completed}/{setupProgress.total} complete
-                  </span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all duration-500 ease-out"
-                    style={{ width: `${setupProgress.percent}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Link
-                href={ROUTES.chat}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={buttonVariants({
-                  variant: "ghost",
-                  size: "sm",
-                  className: "hidden sm:inline-flex",
-                })}
-              >
-                <ExternalLink className="size-4" />
-                View live chat
-              </Link>
-              {isDirty && (
-                <Button variant="ghost" size="sm" onClick={handleDiscardChanges}>
-                  Discard
-                </Button>
-              )}
-              <Button variant="outline" size="sm" onClick={() => setResetDialogOpen(true)}>
-                <RotateCcw className="size-4" />
-                Reset defaults
-              </Button>
-              <Button size="sm" onClick={() => void handleSave()} disabled={saving || !isDirty}>
-                {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-                Save
-                <kbd className="ml-1.5 hidden rounded border border-primary-foreground/20 bg-primary-foreground/10 px-1.5 py-0.5 text-[10px] font-medium lg:inline">
-                  ⌘S
-                </kbd>
-              </Button>
-            </div>
-          </div>
-        </div>
-
+      <AdminPageShell
+        title="Chat Design"
+        description="Customize the chat page shell — header, backgrounds, supplier logos, and empty state."
+        stickyHeader
+        actions={headerActions}
+        headerExtra={headerExtra}
+        className="pb-24 xl:pb-0"
+      >
         {error && (
           <div className="mb-4 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error}
@@ -644,7 +645,7 @@ export function ChatDesignEditor() {
             <ChatDesignPreview theme={theme} />
           </div>
         </div>
-      </div>
+      </AdminPageShell>
 
       {isDirty && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border/60 bg-background/95 p-4 backdrop-blur-md xl:hidden">

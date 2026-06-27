@@ -1,17 +1,22 @@
+import { AdminPageShell } from "@/components/admin/shell/admin-page-shell";
+
 type AdminPageHeaderProps = {
   title: string;
   description?: string;
+  actions?: React.ReactNode;
+  children?: React.ReactNode;
 };
 
-export function AdminPageHeader({ title, description }: AdminPageHeaderProps) {
+/** @deprecated Use AdminPageShell directly */
+export function AdminPageHeader({
+  title,
+  description,
+  actions,
+  children,
+}: AdminPageHeaderProps) {
   return (
-    <header className="mb-8">
-      <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-        {title}
-      </h1>
-      {description && (
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-      )}
-    </header>
+    <AdminPageShell title={title} description={description} actions={actions}>
+      {children}
+    </AdminPageShell>
   );
 }

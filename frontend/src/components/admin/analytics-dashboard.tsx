@@ -11,10 +11,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { BarChart3, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
-import { AnalyticsKpi } from "@/components/admin/analytics/kpi";
-import { AnalyticsPanel } from "@/components/admin/analytics/panel";
 import { TopQueriesPanel } from "@/components/admin/analytics/top-queries-panel";
 import {
   aggregateByWeekday,
@@ -23,6 +21,9 @@ import {
   fmtPercent,
   topDaysByCount,
 } from "@/components/admin/analytics/utils";
+import { AdminPageShell } from "@/components/admin/shell/admin-page-shell";
+import { AdminPanel } from "@/components/admin/shell/admin-panel";
+import { AdminStatGrid } from "@/components/admin/shell/admin-stat-grid";
 import { Button } from "@/components/ui/button";
 import {
   ChartContainer,
@@ -154,73 +155,62 @@ export function AnalyticsDashboard() {
     },
   ];
 
+  const dateRangeActions = (
+    <>
+      <input
+        type="date"
+        value={fromInput}
+        onChange={(event) => setFromInput(event.target.value)}
+        className="h-10 rounded-md border border-[var(--admin-border)] bg-[var(--admin-surface)] px-3 text-sm focus:border-[var(--admin-foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--admin-foreground)]"
+      />
+      <span className="text-[14px] text-[var(--admin-muted)]">to</span>
+      <input
+        type="date"
+        value={toInput}
+        onChange={(event) => setToInput(event.target.value)}
+        className="h-10 rounded-md border border-[var(--admin-border)] bg-[var(--admin-surface)] px-3 text-sm focus:border-[var(--admin-foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--admin-foreground)]"
+      />
+      <Button
+        onClick={applyRange}
+        disabled={loading}
+        className="h-10 rounded-md bg-[var(--admin-foreground)] px-4 text-white hover:bg-[var(--admin-secondary)]"
+      >
+        <RefreshCw
+          className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`}
+        />
+        Apply
+      </Button>
+    </>
+  );
+
   return (
-    <div className="-mx-4 -mb-4 md:-mx-8 md:-mb-8">
-      <div className="border-b border-[#E5E3DF] bg-white">
-        <div className="px-4 py-5 sm:px-6 md:px-8">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <h1 className="flex items-center gap-2 text-[22px] font-semibold tracking-[-0.01em] text-[#1A1A1A]">
-              <BarChart3 className="h-5 w-5 text-[#10B981]" />
-              Analytics
-            </h1>
+    <AdminPageShell
+      title="Analytics"
+      description="Usage metrics for chat and scraping."
+      actions={dateRangeActions}
+    >
+      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
 
-            <div className="flex flex-wrap items-center gap-3">
-              <input
-                type="date"
-                value={fromInput}
-                onChange={(event) => setFromInput(event.target.value)}
-                className="h-10 rounded-lg border border-[#E5E3DF] bg-white px-3 text-[14px] text-[#1A1A1A] focus:border-[#1A1A1A] focus:outline-none focus:ring-1 focus:ring-[#1A1A1A]"
-              />
-              <span className="text-[14px] text-[#A8A39B]">to</span>
-              <input
-                type="date"
-                value={toInput}
-                onChange={(event) => setToInput(event.target.value)}
-                className="h-10 rounded-lg border border-[#E5E3DF] bg-white px-3 text-[14px] text-[#1A1A1A] focus:border-[#1A1A1A] focus:outline-none focus:ring-1 focus:ring-[#1A1A1A]"
-              />
-              <Button
-                onClick={applyRange}
-                disabled={loading}
-                className="h-10 rounded-lg bg-[#1A1A1A] px-4 text-white transition-colors duration-300 hover:bg-[#333]"
-              >
-                <RefreshCw
-                  className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`}
-                />
-                Apply
-              </Button>
-            </div>
-          </div>
-          <p className="mt-2 text-[14px] text-[#A8A39B]">
-            Usage metrics for chat and scraping.
-          </p>
-          {error && <p className="mt-2 text-[14px] text-red-600">{error}</p>}
-        </div>
-      </div>
+      <div className="space-y-5">
+        <AdminStatGrid
+          columns={3}
+          stats={kpisRow1.map((kpi) => ({
+            title: kpi.title,
+            value: kpi.value,
+            description: kpi.description,
+          }))}
+        />
 
-      <div className="space-y-6 bg-[#FAF9F7] px-4 py-6 text-[#1A1A1A] sm:px-6 md:px-8">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {kpisRow1.map((kpi) => (
-            <AnalyticsKpi
-              key={kpi.title}
-              title={kpi.title}
-              value={kpi.value}
-              description={kpi.description}
-            />
-          ))}
-        </div>
+        <AdminStatGrid
+          columns={3}
+          stats={kpisRow2.map((kpi) => ({
+            title: kpi.title,
+            value: kpi.value,
+            description: kpi.description,
+          }))}
+        />
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {kpisRow2.map((kpi) => (
-            <AnalyticsKpi
-              key={kpi.title}
-              title={kpi.title}
-              value={kpi.value}
-              description={kpi.description}
-            />
-          ))}
-        </div>
-
-        <AnalyticsPanel title="Searches per Day">
+        <AdminPanel title="Searches per day" contentClassName="p-4">
           <div className="h-72">
             {loading ? (
               <div className="h-full w-full animate-pulse rounded-xl bg-[#F7F5F0]" />
@@ -233,7 +223,7 @@ export function AnalyticsDashboard() {
                 config={{
                   count: {
                     label: "Searches",
-                    theme: { light: "#10B981", dark: "#10B981" },
+                    theme: { light: "#18181b", dark: "#18181b" },
                   },
                 }}
                 className="h-full w-full"
@@ -277,18 +267,18 @@ export function AnalyticsDashboard() {
                   <Line
                     type="monotone"
                     dataKey="count"
-                    stroke="#10B981"
+                    stroke="#18181b"
                     strokeWidth={2}
                     strokeLinecap="round"
                     dot={{
                       r: 3,
-                      fill: "#10B981",
+                      fill: "#18181b",
                       strokeWidth: 2,
                       stroke: "#fff",
                     }}
                     activeDot={{
                       r: 5,
-                      fill: "#10B981",
+                      fill: "#18181b",
                       strokeWidth: 2,
                       stroke: "#fff",
                     }}
@@ -306,10 +296,10 @@ export function AnalyticsDashboard() {
               </ChartContainer>
             )}
           </div>
-        </AnalyticsPanel>
+        </AdminPanel>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <AnalyticsPanel title="Activity by Day of Week">
+          <AdminPanel title="Activity by Day of Week">
             <p className="mb-3 text-[13px] text-[#A8A39B]">
               Total searches per weekday in the selected range.
             </p>
@@ -369,9 +359,9 @@ export function AnalyticsDashboard() {
                 </ChartContainer>
               )}
             </div>
-          </AnalyticsPanel>
+          </AdminPanel>
 
-          <AnalyticsPanel title="Top 7 Days by Search Volume">
+          <AdminPanel title="Top 7 Days by Search Volume">
             <p className="mb-3 text-[13px] text-[#A8A39B]">
               Busiest days in the selected range.
             </p>
@@ -387,7 +377,7 @@ export function AnalyticsDashboard() {
                   config={{
                     count: {
                       label: "Searches",
-                      theme: { light: "#10B981", dark: "#10B981" },
+                      theme: { light: "#18181b", dark: "#18181b" },
                     },
                   }}
                   className="h-full w-full"
@@ -427,7 +417,7 @@ export function AnalyticsDashboard() {
                     />
                     <Bar
                       dataKey="count"
-                      fill="#10B981"
+                      fill="#18181b"
                       radius={[0, 6, 6, 0]}
                       barSize={20}
                     />
@@ -435,11 +425,11 @@ export function AnalyticsDashboard() {
                 </ChartContainer>
               )}
             </div>
-          </AnalyticsPanel>
+          </AdminPanel>
         </div>
 
         <TopQueriesPanel queries={source.topQueries} />
       </div>
-    </div>
+    </AdminPageShell>
   );
 }

@@ -1,3 +1,5 @@
+import { AdminPanel } from "@/components/admin/shell/admin-panel";
+
 const ARCHITECTURE_DIAGRAM = `User (Chat UI)
     │
     ▼
@@ -27,35 +29,29 @@ const STACK_ITEMS = [
 
 export function ArchitectureDiagram() {
   return (
-    <div className="space-y-8">
-      <div className="rounded-xl border border-border bg-card p-6">
-        <h2 className="mb-4 text-sm font-medium text-muted-foreground">
-          Data flow
-        </h2>
-        <pre className="overflow-x-auto rounded-lg bg-muted/50 p-4 font-mono text-xs leading-relaxed text-foreground">
+    <div className="space-y-6">
+      <AdminPanel title="Data flow" contentClassName="p-0">
+        <pre className="overflow-x-auto bg-[var(--admin-bg)] p-5 font-mono text-xs leading-relaxed text-[var(--admin-foreground)] sm:p-6">
           {ARCHITECTURE_DIAGRAM}
         </pre>
-      </div>
+      </AdminPanel>
 
-      <div className="rounded-xl border border-border bg-card p-6">
-        <h2 className="mb-4 text-sm font-medium text-muted-foreground">
-          Stack
-        </h2>
-        <ul className="space-y-2 text-sm">
+      <AdminPanel title="Stack">
+        <ul className="space-y-2 text-[14px] text-[var(--admin-foreground)]">
           {STACK_ITEMS.map((item) => (
             <li key={item} className="flex gap-2">
-              <span className="text-muted-foreground">•</span>
+              <span className="text-[var(--admin-muted)]">•</span>
               <span>{item}</span>
             </li>
           ))}
         </ul>
-        <p className="mt-4 text-xs text-muted-foreground">
+        <p className="mt-4 text-[12px] text-[var(--admin-muted)]">
           Full architecture reference:{" "}
-          <code className="rounded bg-muted px-1 py-0.5">
+          <code className="rounded bg-[var(--admin-bg)] px-1.5 py-0.5 text-[var(--admin-foreground)]">
             .cursor/docs/architecture.md
           </code>
         </p>
-      </div>
+      </AdminPanel>
     </div>
   );
 }

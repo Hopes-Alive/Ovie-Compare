@@ -6,11 +6,12 @@ type AdminLayoutProps = {
 
 export function AdminLayout({ children }: AdminLayoutProps) {
   return (
-    <div className="flex min-h-full flex-col md:flex-row">
+    <div
+      data-admin-portal
+      className="flex min-h-screen bg-[var(--admin-bg)] text-[var(--admin-foreground)]"
+    >
       <AdminSidebar />
-      <main className="flex-1 overflow-auto bg-zinc-50/80 p-4 md:p-8">
-        <div className="mx-auto max-w-7xl">{children}</div>
-      </main>
+      <main className="flex min-h-screen min-w-0 flex-1 flex-col">{children}</main>
     </div>
   );
 }

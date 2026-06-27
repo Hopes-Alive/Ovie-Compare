@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useState } from "react";
 
-import { SupplierDetailSheet } from "@/components/admin/supplier-detail-sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +13,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AdminTableCard } from "@/components/admin/shell/admin-table-card";
+import { SupplierDetailSheet } from "@/components/admin/supplier-detail-sheet";
 import { ROUTES } from "@/config/routes";
 import { mockSuppliers } from "@/data/mock/admin";
 import type { SupplierStatus, SupplierSummary } from "@/types/admin";
@@ -41,7 +42,6 @@ function statusLabel(status: SupplierStatus) {
 }
 
 export function SupplierTable() {
-  // TODO: replace with useAdminSuppliers()
   const suppliers = mockSuppliers;
   const [selected, setSelected] = useState<SupplierSummary | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -53,29 +53,47 @@ export function SupplierTable() {
 
   return (
     <>
-      <div className="rounded-xl border border-border bg-card">
+      <AdminTableCard
+        footer={
+          <>
+            To add a new supplier, a scraper adapter must be deployed in the
+            codebase. Contact the dev team.
+          </>
+        }
+      >
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Supplier</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Products</TableHead>
-              <TableHead>Last check</TableHead>
-              <TableHead className="text-right">Errors (24h)</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="text-[var(--admin-muted)]">Supplier</TableHead>
+              <TableHead className="text-[var(--admin-muted)]">Status</TableHead>
+              <TableHead className="text-right text-[var(--admin-muted)]">
+                Products
+              </TableHead>
+              <TableHead className="text-[var(--admin-muted)]">Last check</TableHead>
+              <TableHead className="text-right text-[var(--admin-muted)]">
+                Errors (24h)
+              </TableHead>
+              <TableHead className="text-right text-[var(--admin-muted)]">
+                Actions
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {suppliers.map((supplier) => (
-              <TableRow key={supplier.slug}>
+              <TableRow
+                key={supplier.slug}
+                className="hover:bg-[var(--admin-bg)]/70"
+              >
                 <TableCell>
                   <button
                     type="button"
                     onClick={() => openDetail(supplier)}
                     className="text-left hover:underline"
                   >
-                    <p className="font-medium">{supplier.name}</p>
-                    <span className="text-xs text-muted-foreground">
+                    <p className="font-medium text-[var(--admin-foreground)]">
+                      {supplier.name}
+                    </p>
+                    <span className="text-xs text-[var(--admin-muted)]">
                       {supplier.websiteUrl.replace(/^https?:\/\//, "")}
                     </span>
                   </button>
@@ -85,11 +103,13 @@ export function SupplierTable() {
                     {statusLabel(supplier.status)}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell className="text-right tabular-nums">
                   {supplier.productCount > 0 ? supplier.productCount : "—"}
                 </TableCell>
                 <TableCell>{supplier.lastCheckAgo}</TableCell>
-                <TableCell className="text-right">{supplier.errors24h}</TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {supplier.errors24h}
+                </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
                     <Button
@@ -114,11 +134,7 @@ export function SupplierTable() {
             ))}
           </TableBody>
         </Table>
-        <p className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-          To add a new supplier, a scraper adapter must be deployed in the
-          codebase. Contact the dev team.
-        </p>
-      </div>
+      </AdminTableCard>
       <SupplierDetailSheet
         supplier={selected}
         open={sheetOpen}
