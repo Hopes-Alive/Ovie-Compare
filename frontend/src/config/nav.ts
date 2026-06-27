@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   MessageSquare,
   Network,
+  Palette,
   QrCode,
 } from "lucide-react";
 
@@ -94,6 +95,11 @@ export const ADMIN_NAV_ITEMS = [
     title: "Overview",
     href: ROUTES.admin.overview,
     icon: LayoutDashboard,
+  },
+  {
+    title: "Chat Design",
+    href: ROUTES.admin.chatDesign,
+    icon: Palette,
   },
   {
     title: "Suppliers",

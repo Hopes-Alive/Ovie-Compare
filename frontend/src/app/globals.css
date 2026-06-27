@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -127,4 +128,47 @@
   html {
     @apply font-sans;
   }
+}
+
+/* ── Chat shell (gpta-inspired) ── */
+.chat-panel {
+  background-color: var(--chat-panel-bg, #f8fafc);
+}
+
+.chat-hero {
+  position: relative;
+  flex: none;
+  width: 100%;
+  line-height: 0;
+  overflow: hidden;
+}
+
+.chat-hero-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-position: center top;
+}
+
+.chat-hero-banner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent 40%,
+    var(--chat-hero-fade-to, #f8fafc) 100%
+  );
+}
+
+.chat-action-chip {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.messages-container {
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }

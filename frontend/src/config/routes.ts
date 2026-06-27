@@ -4,6 +4,7 @@ export const ROUTES = {
   demo: "/demo",
   admin: {
     overview: "/admin",
+    chatDesign: "/admin/chat-design",
     suppliers: "/admin/suppliers",
     analytics: "/admin/analytics",
     jobs: "/admin/jobs",

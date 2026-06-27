@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev:api": "tsx watch src/api/server.ts",
+    "start:api": "tsx src/api/server.ts",
     "test:scrape": "tsx src/scripts/test-scrape.ts",
     "test:scrape:adam-dental": "tsx src/scripts/test-scrape.ts --supplier adam-dental",
     "discover:henry-schein": "tsx src/scripts/discover-categories.ts",
@@ -21,9 +23,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@hono/node-server": "^2.0.6",
     "@playwright/test": "^1.52.0",
     "@supabase/supabase-js": "^2.108.2",
     "dotenv": "^16.4.7",
+    "hono": "^4.12.27",
     "openai": "^6.45.0",
     "playwright": "^1.52.0"
   },

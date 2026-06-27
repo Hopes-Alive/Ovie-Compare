@@ -1,6 +1,7 @@
 "use client";
 
-import { ComparisonTable } from "@/components/chat/comparison-table";
+import ReactMarkdown from "react-markdown";
+
 import { ProductCard } from "@/components/chat/product-card";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, ProductCardData } from "@/types/chat";
@@ -19,34 +20,51 @@ export function MessageBubble({
   const isUser = message.role === "user";
   const displayProducts = products ?? message.products;
 
-  return (
-    <div
-      className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}
-    >
-      <div
-        className={cn(
-          "max-w-[85%] space-y-3 rounded-2xl px-4 py-3 text-sm leading-relaxed",
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted text-foreground"
-        )}
-      >
-        <p>{message.content}</p>
-        {displayProducts && displayProducts.length > 0 && (
-          <div className="space-y-3 pt-1">
-            <ComparisonTable products={displayProducts} />
-            <div className="space-y-3">
-              {displayProducts.map((product) => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  onPriceUpdate={onPriceUpdate}
-                />
-              ))}
-            </div>
-          </div>
-        )}
+  if (isUser) {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[75%] rounded-2xl rounded-br-sm bg-primary px-4 py-3 text-sm leading-relaxed text-primary-foreground">
+          {message.content}
+        </div>
       </div>
+    );
+  }
+
+  // Assistant message
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-start gap-3">
+        {/* Avatar */}
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary select-none">
+          O
+        </div>
+
+        {/* Text bubble */}
+        <div className="rounded-2xl rounded-tl-sm bg-muted px-4 py-3 text-sm leading-relaxed text-foreground">
+          <div className="prose prose-sm dark:prose-invert max-w-none [&>p]:mb-2 [&>p:last-child]:mb-0 [&>ul]:mb-2 [&>ol]:mb-2 [&>ul]:pl-4 [&>ol]:pl-4 [&_strong]:font-semibold [&_li]:mb-0.5">
+            <ReactMarkdown>{message.content}</ReactMarkdown>
+          </div>
+        </div>
+      </div>
+
+      {/* Product cards — outside the bubble, full message width */}
+      {displayProducts && displayProducts.length > 0 && (
+        <div className="pl-11">
+          {/* Summary bar */}
+          <p className="mb-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            {displayProducts.length} product{displayProducts.length !== 1 ? "s" : ""} found
+          </p>
+          <div className="grid gap-3 sm:grid-cols-1">
+            {displayProducts.map((product) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                onPriceUpdate={onPriceUpdate}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

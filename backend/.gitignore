@@ -1,0 +1,3 @@
+# Locally uploaded chat design assets (keep folder structure)
+uploads/chat-design/**/*
+!uploads/chat-design/.gitkeep

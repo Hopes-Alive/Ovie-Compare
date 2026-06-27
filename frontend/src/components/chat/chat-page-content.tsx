@@ -1,42 +1,143 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ChatHeader } from "@/components/chat/chat-header";
-import { ChatInput } from "@/components/chat/chat-input";
 import { MessageList } from "@/components/chat/message-list";
+import { ChatBackground } from "@/components/chat/shell/chat-background";
+import { ChatComposerBar } from "@/components/chat/shell/chat-composer-bar";
+import { ChatMessagesBackdrop } from "@/components/chat/shell/chat-messages-backdrop";
+import { ChatShellHeader } from "@/components/chat/shell/chat-shell-header";
 import { SuggestedPrompts } from "@/components/chat/suggested-prompts";
-import { mockChatMessages, SHOW_DEMO } from "@/data/mock/chat";
+import { ChatThemeProvider } from "@/components/chat/theme/chat-theme-provider";
+import { DEFAULT_CHAT_DESIGN, resolveChatDesign } from "@/lib/chat-design/theme";
+import type { ChatDesignTheme } from "@/types/chat-design";
 import type { ChatMessage, ProductCardData } from "@/types/chat";
 
 function createId() {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+type SseEvent =
+  | { type: "token"; text: string }
+  | { type: "products"; products: ProductCardData[]; total: number; fallback: boolean }
+  | { type: "error"; message: string }
+  | { type: "done" };
+
 export function ChatPageContent() {
-  const [messages, setMessages] = useState<ChatMessage[]>(
-    SHOW_DEMO ? mockChatMessages : []
-  );
-  const [productOverrides, setProductOverrides] = useState<
-    Record<string, ProductCardData>
-  >({});
+  const [theme, setTheme] = useState<ChatDesignTheme>(DEFAULT_CHAT_DESIGN);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [productOverrides, setProductOverrides] = useState<Record<string, ProductCardData>>({});
+  const [isLoading, setIsLoading] = useState(false);
+
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
+
+  useEffect(() => {
+    fetch("/api/chat-design")
+      .then((r) => r.json())
+      .then((data: { theme?: Partial<ChatDesignTheme> }) => {
+        if (data.theme) setTheme(resolveChatDesign(data.theme));
+      })
+      .catch(() => {
+        /* keep defaults */
+      });
+  }, []);
 
   const isEmpty = messages.length === 0;
 
-  const handleSend = useCallback((text: string) => {
-    // TODO: replace with POST /api/chat
+  const handleSend = useCallback(async (text: string) => {
     const userMessage: ChatMessage = {
       id: createId(),
       role: "user",
       content: text,
     };
+    const assistantId = createId();
     const assistantMessage: ChatMessage = {
-      id: createId(),
+      id: assistantId,
       role: "assistant",
-      content:
-        "Chat API is not wired yet. This is a UI preview — connect POST /api/chat to get real product results.",
+      content: "",
     };
+
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
+    setIsLoading(true);
+
+    const history = messagesRef.current.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text, history }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const raw = line.slice(6).trim();
+          if (!raw) continue;
+
+          let event: SseEvent;
+          try {
+            event = JSON.parse(raw) as SseEvent;
+          } catch {
+            continue;
+          }
+
+          if (event.type === "token") {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, content: m.content + event.text } : m
+              )
+            );
+          } else if (event.type === "products") {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, products: event.products } : m
+              )
+            );
+          } else if (event.type === "error") {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? { ...m, content: event.message || "Something went wrong. Please try again." }
+                  : m
+              )
+            );
+            break;
+          } else if (event.type === "done") {
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      const errorText =
+        err instanceof Error
+          ? err.message
+          : "Connection error. Please check that the backend is running.";
+      setMessages((prev) =>
+        prev.map((m) => (m.id === assistantId ? { ...m, content: errorText } : m))
+      );
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   const handlePriceUpdate = useCallback(
@@ -44,9 +145,7 @@ export function ChatPageContent() {
       setProductOverrides((prev) => {
         const base =
           prev[productId] ??
-          messages
-            .flatMap((m) => m.products ?? [])
-            .find((p) => p.id === productId);
+          messages.flatMap((m) => m.products ?? []).find((p) => p.id === productId);
         if (!base) return prev;
         return {
           ...prev,
@@ -63,18 +162,29 @@ export function ChatPageContent() {
   );
 
   return (
-    <>
-      <ChatHeader onNewChat={() => setMessages([])} />
-      {isEmpty ? (
-        <SuggestedPrompts onSelect={handleSend} />
-      ) : (
-        <MessageList
-          messages={messages}
-          productOverrides={productOverrides}
-          onPriceUpdate={handlePriceUpdate}
-        />
-      )}
-      <ChatInput onSend={handleSend} />
-    </>
+    <ChatThemeProvider theme={theme}>
+      <div
+        className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden"
+        style={{ backgroundColor: theme.pageBg }}
+      >
+        <ChatBackground />
+        <ChatShellHeader onNewChat={() => setMessages([])} />
+
+        <ChatMessagesBackdrop>
+          {isEmpty ? (
+            <SuggestedPrompts onSelect={handleSend} />
+          ) : (
+            <MessageList
+              messages={messages}
+              productOverrides={productOverrides}
+              onPriceUpdate={handlePriceUpdate}
+              isLoading={isLoading}
+            />
+          )}
+        </ChatMessagesBackdrop>
+
+        <ChatComposerBar onSend={handleSend} disabled={isLoading} />
+      </div>
+    </ChatThemeProvider>
   );
 }

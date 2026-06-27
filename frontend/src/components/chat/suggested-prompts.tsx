@@ -1,36 +1,105 @@
 "use client";
 
-import { CHAT_SUGGESTED_PROMPTS } from "@/config/nav";
-import { Button } from "@/components/ui/button";
+import { ArrowRight, GitCompare, Search, ShoppingCart, TrendingDown } from "lucide-react";
+
+import { useChatTheme } from "@/components/chat/theme/chat-theme-provider";
+import { resolveAssetUrl } from "@/lib/chat-design/asset-url";
+import type { SuggestedPromptIcon } from "@/types/chat-design";
+
+const ICON_MAP = {
+  search: Search,
+  compare: GitCompare,
+  cart: ShoppingCart,
+  trending: TrendingDown,
+} as const;
 
 type SuggestedPromptsProps = {
   onSelect?: (prompt: string) => void;
 };
 
 export function SuggestedPrompts({ onSelect }: SuggestedPromptsProps) {
+  const theme = useChatTheme();
+  const initial = (theme.brandName || "O").slice(0, 1).toUpperCase();
+  const logoUrl = resolveAssetUrl(theme.logoUrl);
+
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-4 py-12">
-      <div className="mx-auto max-w-lg text-center">
-        <h2 className="text-lg font-semibold text-foreground">
-          Compare dental supplies
-        </h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Ask about products, prices, and stock across Henry Schein and Adam
-          Dental.
-        </p>
-        <div className="mt-6 flex flex-col gap-2">
-          {CHAT_SUGGESTED_PROMPTS.map((prompt) => (
-            <Button
-              key={prompt}
-              variant="outline"
-              className="h-auto justify-start px-4 py-3 text-left text-sm font-normal"
-              onClick={() => onSelect?.(prompt)}
+    <div className="flex flex-1 flex-col items-center justify-center px-4 py-8">
+      <div className="mx-auto w-full max-w-lg">
+        <div className="mb-8 text-center">
+          {logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={logoUrl}
+              alt=""
+              className="mx-auto mb-4 size-14 rounded-2xl object-cover shadow-sm"
+            />
+          ) : (
+            <div
+              className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl text-2xl font-bold text-white shadow-sm"
+              style={{ backgroundColor: theme.primaryColor }}
             >
-              {prompt}
-            </Button>
+              {initial}
+            </div>
+          )}
+          <h1 className="text-xl font-bold tracking-tight" style={{ color: theme.headerText }}>
+            {theme.emptyStateTitle}
+          </h1>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
+            {theme.emptyStateSubtitle}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {theme.suggestedPrompts.map((item) => (
+            <PromptCard
+              key={item.prompt}
+              icon={item.icon}
+              label={item.label}
+              prompt={item.prompt}
+              accent={theme.accentColor}
+              onSelect={onSelect}
+            />
           ))}
         </div>
       </div>
     </div>
+  );
+}
+
+function PromptCard({
+  icon,
+  label,
+  prompt,
+  accent,
+  onSelect,
+}: {
+  icon: SuggestedPromptIcon;
+  label: string;
+  prompt: string;
+  accent: string;
+  onSelect?: (prompt: string) => void;
+}) {
+  const Icon = ICON_MAP[icon] ?? Search;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect?.(prompt)}
+      className="group flex items-start gap-3 rounded-xl border border-border/80 bg-card/80 p-3.5 text-left backdrop-blur-sm transition-all hover:border-primary/30 hover:shadow-sm"
+    >
+      <div
+        className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg text-white"
+        style={{ backgroundColor: `${accent}cc` }}
+      >
+        <Icon className="size-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {label}
+        </p>
+        <p className="text-sm leading-snug text-foreground">{prompt}</p>
+      </div>
+      <ArrowRight className="mt-1 size-4 shrink-0 text-muted-foreground/30 transition-all group-hover:translate-x-0.5 group-hover:text-primary" />
+    </button>
   );
 }

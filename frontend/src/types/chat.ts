@@ -2,6 +2,15 @@ export type Freshness = "fresh" | "moderate" | "stale";
 
 export type StockStatus = "in_stock" | "out_of_stock" | "low_stock" | "unknown";
 
+export type ProductAlternative = {
+  supplier: string;
+  supplier_slug: string;
+  price: number | null;
+  currency: string;
+  url: string | null;
+  name: string;
+};
+
 export type ProductCardData = {
   id: string;
   supplier: string;
@@ -14,6 +23,10 @@ export type ProductCardData = {
   lastCheckedAgo: string;
   freshness: Freshness;
   imageUrl?: string;
+  imageUrls?: string[];
+  url?: string;
+  /** Same product at other suppliers (from canonical matching) */
+  alternatives?: ProductAlternative[];
 };
 
 export type ChatMessageRole = "user" | "assistant";
