@@ -2,6 +2,7 @@
 
 import { ArrowRight, GitCompare, Search, ShoppingCart, TrendingDown } from "lucide-react";
 
+import { useChatViewModeContext } from "@/components/chat/chat-view-mode-context";
 import { useChatTheme } from "@/components/chat/theme/chat-theme-provider";
 import { resolveAssetUrl } from "@/lib/chat-design/asset-url";
 import { getChatTextColors } from "@/lib/chat-design/text-colors";
@@ -22,6 +23,7 @@ type SuggestedPromptsProps = {
 
 export function SuggestedPrompts({ onSelect }: SuggestedPromptsProps) {
   const theme = useChatTheme();
+  const { isWide, layout } = useChatViewModeContext();
   const compact = useChatPanelCompact();
   const textColors = getChatTextColors(theme);
   const initial = (theme.brandName || "O").slice(0, 1).toUpperCase();
@@ -77,7 +79,16 @@ export function SuggestedPrompts({ onSelect }: SuggestedPromptsProps) {
           </p>
         </div>
 
-        <div className={cn("grid gap-2", compact ? "grid-cols-1" : "md:grid-cols-2")}>
+        <div
+          className={cn(
+            "grid gap-2",
+            compact
+              ? "grid-cols-1"
+              : layout === "desktop" && isWide
+                ? "grid-cols-2"
+                : "md:grid-cols-2"
+          )}
+        >
           {theme.suggestedPrompts.map((item) => (
             <PromptCard
               key={item.prompt}

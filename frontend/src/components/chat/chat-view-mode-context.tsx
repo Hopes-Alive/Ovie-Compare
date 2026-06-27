@@ -3,6 +3,7 @@
 import { createContext, useContext } from "react";
 
 import type { ChatViewMode } from "@/lib/chat-design/chat-view-mode";
+import { getPreviewViewMode } from "@/lib/chat-design/chat-view-mode";
 
 export type ChatViewModeContextValue = {
   layout: "portrait-phone" | "phone-landscape" | "desktop";
@@ -15,15 +16,8 @@ export type ChatViewModeContextValue = {
 
 const ChatViewModeContext = createContext<ChatViewModeContextValue | null>(null);
 
-/** Static values for admin preview mockup (no expand/contract) */
-export const PREVIEW_VIEW_MODE: ChatViewModeContextValue = {
-  layout: "portrait-phone",
-  viewMode: "narrow",
-  canToggle: false,
-  isWide: false,
-  setViewMode: () => {},
-  toggleViewMode: () => {},
-};
+/** @deprecated Use getPreviewViewMode("mobile") */
+export const PREVIEW_VIEW_MODE: ChatViewModeContextValue = getPreviewViewMode("mobile");
 
 export function ChatViewModeProvider({
   value,
