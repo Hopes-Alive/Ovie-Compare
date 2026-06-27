@@ -1,22 +1,23 @@
 import type { Metadata } from "next";
 
-import { AdminPageHeader } from "@/components/admin/admin-page-header";
-import { OverviewActions } from "@/components/admin/overview-actions";
-import { OverviewCards } from "@/components/admin/overview-cards";
+import { OverviewDashboard } from "@/components/admin/overview-dashboard";
+import { getChatUrlFromEnv } from "@/config/routes";
+import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
   title: "Overview | Ovie Admin",
 };
 
-export default function AdminOverviewPage() {
+export default async function AdminOverviewPage() {
+  const supabase = await createClient();
+  const { data: suppliers } = await supabase
+    .from("suppliers")
+    .select("slug, name, base_url, is_active")
+    .order("name");
+
+  const chatUrl = getChatUrlFromEnv();
+
   return (
-    <>
-      <AdminPageHeader
-        title="Overview"
-        description="Summary of connected suppliers and system health."
-      />
-      <OverviewCards />
-      <OverviewActions />
-    </>
+    <OverviewDashboard chatUrl={chatUrl} suppliers={suppliers ?? []} />
   );
 }

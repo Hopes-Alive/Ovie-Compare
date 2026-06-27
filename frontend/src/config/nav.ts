@@ -1,7 +1,6 @@
 import {
   Activity,
   Briefcase,
-  Building2,
   LayoutDashboard,
   MessageSquare,
   Network,
@@ -58,11 +57,6 @@ export const DEMO_SECTIONS: DemoSection[] = [
         description: "Summary cards, open chat, copy URL",
       },
       {
-        label: "Suppliers",
-        href: ROUTES.admin.suppliers,
-        description: "Data sources, status, detail drawer",
-      },
-      {
         label: "Analytics",
         href: ROUTES.admin.analytics,
         description: "Sessions, live checks, top queries",
@@ -85,7 +79,7 @@ export const DEMO_FLOW_ORDER = [
   { step: 1, label: "Landing", href: ROUTES.home },
   { step: 2, label: "Chat (product search)", href: ROUTES.chat },
   { step: 3, label: "Admin overview", href: ROUTES.admin.overview },
-  { step: 4, label: "Suppliers & jobs", href: ROUTES.admin.suppliers },
+  { step: 4, label: "Jobs", href: ROUTES.admin.jobs },
   { step: 5, label: "Analytics", href: ROUTES.admin.analytics },
   { step: 6, label: "Architecture", href: ROUTES.admin.architecture },
 ] as const;
@@ -100,11 +94,6 @@ export const ADMIN_NAV_ITEMS = [
     title: "Chat Design",
     href: ROUTES.admin.chatDesign,
     icon: Palette,
-  },
-  {
-    title: "Suppliers",
-    href: ROUTES.admin.suppliers,
-    icon: Building2,
   },
   {
     title: "Analytics",
