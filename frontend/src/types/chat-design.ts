@@ -18,14 +18,23 @@ export interface ChatDesignTheme {
   pageBg: string;
   headerBg: string;
   headerText: string;
+  headerSubtitleText: string;
+  bannerHeaderTitleText: string;
+  bannerHeaderSubtitleText: string;
+  emptyStateTitleText: string;
+  emptyStateSubtitleText: string;
+  promptLabelText: string;
+  promptText: string;
   composerBg: string;
   composerInputBg: string;
   composerInputText: string;
+  composerDisclaimerText: string;
   sendButtonBg: string;
   sendButtonText: string;
 
   headerBannerImageUrl: string;
   backgroundImageUrl: string;
+  expandedBackgroundImageUrl: string;
   backgroundSharpness: number;
 
   emptyStateTitle: string;

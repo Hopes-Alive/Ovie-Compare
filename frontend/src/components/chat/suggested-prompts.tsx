@@ -4,6 +4,7 @@ import { ArrowRight, GitCompare, Search, ShoppingCart, TrendingDown } from "luci
 
 import { useChatTheme } from "@/components/chat/theme/chat-theme-provider";
 import { resolveAssetUrl } from "@/lib/chat-design/asset-url";
+import { getChatTextColors } from "@/lib/chat-design/text-colors";
 import type { SuggestedPromptIcon } from "@/types/chat-design";
 
 const ICON_MAP = {
@@ -19,6 +20,7 @@ type SuggestedPromptsProps = {
 
 export function SuggestedPrompts({ onSelect }: SuggestedPromptsProps) {
   const theme = useChatTheme();
+  const textColors = getChatTextColors(theme);
   const initial = (theme.brandName || "O").slice(0, 1).toUpperCase();
   const logoUrl = resolveAssetUrl(theme.logoUrl);
 
@@ -41,10 +43,16 @@ export function SuggestedPrompts({ onSelect }: SuggestedPromptsProps) {
               {initial}
             </div>
           )}
-          <h1 className="text-xl font-bold tracking-tight" style={{ color: theme.headerText }}>
+          <h1
+            className="text-xl font-bold tracking-tight"
+            style={{ color: textColors.emptyStateTitle }}
+          >
             {theme.emptyStateTitle}
           </h1>
-          <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
+          <p
+            className="mx-auto mt-2 max-w-sm text-sm"
+            style={{ color: textColors.emptyStateSubtitle }}
+          >
             {theme.emptyStateSubtitle}
           </p>
         </div>
@@ -57,6 +65,8 @@ export function SuggestedPrompts({ onSelect }: SuggestedPromptsProps) {
               label={item.label}
               prompt={item.prompt}
               accent={theme.accentColor}
+              labelColor={textColors.promptLabel}
+              promptColor={textColors.promptBody}
               onSelect={onSelect}
             />
           ))}
@@ -71,12 +81,16 @@ function PromptCard({
   label,
   prompt,
   accent,
+  labelColor,
+  promptColor,
   onSelect,
 }: {
   icon: SuggestedPromptIcon;
   label: string;
   prompt: string;
   accent: string;
+  labelColor: string;
+  promptColor: string;
   onSelect?: (prompt: string) => void;
 }) {
   const Icon = ICON_MAP[icon] ?? Search;
@@ -85,7 +99,7 @@ function PromptCard({
     <button
       type="button"
       onClick={() => onSelect?.(prompt)}
-      className="group flex items-start gap-3 rounded-xl border border-border/80 bg-card/80 p-3.5 text-left backdrop-blur-sm transition-all hover:border-primary/30 hover:shadow-sm"
+      className="group flex items-start gap-3 rounded-2xl border border-border/80 bg-card/80 p-3.5 text-left backdrop-blur-sm transition-all hover:border-primary/30 hover:shadow-sm"
     >
       <div
         className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg text-white"
@@ -94,10 +108,15 @@ function PromptCard({
         <Icon className="size-4" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <p
+          className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide"
+          style={{ color: labelColor }}
+        >
           {label}
         </p>
-        <p className="text-sm leading-snug text-foreground">{prompt}</p>
+        <p className="text-sm leading-snug" style={{ color: promptColor }}>
+          {prompt}
+        </p>
       </div>
       <ArrowRight className="mt-1 size-4 shrink-0 text-muted-foreground/30 transition-all group-hover:translate-x-0.5 group-hover:text-primary" />
     </button>

@@ -4,6 +4,7 @@ import { Loader2, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { useChatTheme } from "@/components/chat/theme/chat-theme-provider";
+import { getChatTextColors } from "@/lib/chat-design/text-colors";
 import { getSendButtonColors } from "@/lib/chat-design/theme";
 
 type ChatComposerBarProps = {
@@ -13,6 +14,7 @@ type ChatComposerBarProps = {
 
 export function ChatComposerBar({ onSend, disabled = false }: ChatComposerBarProps) {
   const theme = useChatTheme();
+  const textColors = getChatTextColors(theme);
   const send = getSendButtonColors(theme);
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -37,7 +39,7 @@ export function ChatComposerBar({ onSend, disabled = false }: ChatComposerBarPro
 
   return (
     <div
-      className="shrink-0 px-4 py-3"
+      className="chat-shell-composer shrink-0 px-4 py-3"
       style={{
         backgroundColor: theme.composerBg,
         paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
@@ -59,7 +61,7 @@ export function ChatComposerBar({ onSend, disabled = false }: ChatComposerBarPro
             disabled={disabled}
             rows={1}
             className="max-h-[120px] min-h-[36px] flex-1 resize-none bg-transparent py-1.5 text-sm leading-relaxed focus:outline-none disabled:opacity-50"
-            style={{ color: theme.composerInputText }}
+            style={{ color: textColors.composerInput }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -84,7 +86,10 @@ export function ChatComposerBar({ onSend, disabled = false }: ChatComposerBarPro
             )}
           </button>
         </div>
-        <p className="mt-1.5 text-center text-[11px] text-muted-foreground/70">
+        <p
+          className="mt-1.5 text-center text-[11px]"
+          style={{ color: textColors.composerDisclaimer }}
+        >
           Prices may be outdated · Always verify before ordering
         </p>
       </form>

@@ -3,7 +3,7 @@ import type { ChatDesignTheme } from "@/types/chat-design";
 export const DEFAULT_CHAT_DESIGN: ChatDesignTheme = {
   brandName: "Ovie",
   brandTagline: "Dental supply comparison",
-  headerSubtitle: "Compare prices across Henry Schein & Adam Dental",
+  headerSubtitle: "I'm an intelligent agent, not a chat bot",
   logoUrl: "",
 
   primaryColor: "#2563eb",
@@ -11,14 +11,23 @@ export const DEFAULT_CHAT_DESIGN: ChatDesignTheme = {
   pageBg: "#f8fafc",
   headerBg: "#ffffff",
   headerText: "#0f172a",
+  headerSubtitleText: "#64748b",
+  bannerHeaderTitleText: "#ffffff",
+  bannerHeaderSubtitleText: "#e2e8f0",
+  emptyStateTitleText: "#0f172a",
+  emptyStateSubtitleText: "#64748b",
+  promptLabelText: "#64748b",
+  promptText: "#0f172a",
   composerBg: "#ffffff",
   composerInputBg: "#f1f5f9",
   composerInputText: "#0f172a",
+  composerDisclaimerText: "#94a3b8",
   sendButtonBg: "",
   sendButtonText: "#ffffff",
 
   headerBannerImageUrl: "",
   backgroundImageUrl: "",
+  expandedBackgroundImageUrl: "",
   backgroundSharpness: 100,
 
   emptyStateTitle: "How can I help today?",

@@ -7,7 +7,7 @@ import { randomUUID } from "crypto";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 export const UPLOADS_ROOT = resolve(__dirname, "../../../uploads/chat-design");
 
-export const UPLOAD_KINDS = ["logo", "header-banner", "background"] as const;
+export const UPLOAD_KINDS = ["logo", "header-banner", "background", "background-expanded"] as const;
 export type UploadKind = (typeof UPLOAD_KINDS)[number];
 
 const ALLOWED_MIME = new Set([
@@ -17,6 +17,20 @@ const ALLOWED_MIME = new Set([
   "image/gif",
   "image/svg+xml",
 ]);
+
+const MIME_ALIASES: Record<string, string> = {
+  "image/x-png": "image/png",
+  "image/jpg": "image/jpeg",
+};
+
+const EXT_TO_MIME: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+};
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
@@ -32,18 +46,31 @@ export function isUploadKind(value: string): value is UploadKind {
   return (UPLOAD_KINDS as readonly string[]).includes(value);
 }
 
+function resolveFileMime(file: File): string | null {
+  const fromType = MIME_ALIASES[file.type] ?? file.type;
+  if (fromType && ALLOWED_MIME.has(fromType)) return fromType;
+
+  const fromExt = EXT_TO_MIME[extname(file.name).toLowerCase()];
+  if (fromExt && ALLOWED_MIME.has(fromExt)) return fromExt;
+
+  return null;
+}
+
 export async function saveChatDesignImage(
   kind: UploadKind,
   file: File
 ): Promise<{ path: string; url: string }> {
-  if (!ALLOWED_MIME.has(file.type)) {
-    throw new Error(`Unsupported file type: ${file.type || "unknown"}`);
+  const mime = resolveFileMime(file);
+  if (!mime) {
+    throw new Error(
+      `Unsupported file type: ${file.type || extname(file.name) || "unknown"}. Use PNG, JPG, WebP, GIF, or SVG.`
+    );
   }
   if (file.size > MAX_BYTES) {
     throw new Error("File too large (max 5 MB)");
   }
 
-  const ext = EXT_BY_MIME[file.type] ?? (extname(file.name) || ".png");
+  const ext = EXT_BY_MIME[mime] ?? extname(file.name).toLowerCase() ?? ".png";
   const dir = join(UPLOADS_ROOT, kind);
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true });

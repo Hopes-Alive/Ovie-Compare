@@ -219,32 +219,101 @@ export function ChatDesignEditor() {
           {/* Colors */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Colors</CardTitle>
+              <CardTitle className="text-base">Background colors</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
               <ColorField label="Primary" value={theme.primaryColor} onChange={(v) => patch({ primaryColor: v })} />
               <ColorField label="Accent" value={theme.accentColor} onChange={(v) => patch({ accentColor: v })} />
               <ColorField label="Page background" value={theme.pageBg} onChange={(v) => patch({ pageBg: v })} />
               <ColorField label="Header background" value={theme.headerBg} onChange={(v) => patch({ headerBg: v })} />
-              <ColorField label="Header text" value={theme.headerText} onChange={(v) => patch({ headerText: v })} />
               <ColorField label="Composer background" value={theme.composerBg} onChange={(v) => patch({ composerBg: v })} />
               <ColorField label="Input background" value={theme.composerInputBg} onChange={(v) => patch({ composerInputBg: v })} />
-              <ColorField label="Send button" value={theme.sendButtonBg || theme.primaryColor} onChange={(v) => patch({ sendButtonBg: v })} />
+              <ColorField label="Send button background" value={theme.sendButtonBg || theme.primaryColor} onChange={(v) => patch({ sendButtonBg: v })} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Text colors</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-4 sm:grid-cols-2">
+              <ColorField
+                label="Header name (classic)"
+                value={theme.headerText}
+                onChange={(v) => patch({ headerText: v })}
+              />
+              <ColorField
+                label="Header subtitle (classic)"
+                value={theme.headerSubtitleText}
+                onChange={(v) => patch({ headerSubtitleText: v })}
+              />
+              <ColorField
+                label="Banner header name"
+                value={theme.bannerHeaderTitleText}
+                onChange={(v) => patch({ bannerHeaderTitleText: v })}
+              />
+              <ColorField
+                label="Banner header subtitle"
+                value={theme.bannerHeaderSubtitleText}
+                onChange={(v) => patch({ bannerHeaderSubtitleText: v })}
+              />
+              <ColorField
+                label="Empty state title"
+                value={theme.emptyStateTitleText}
+                onChange={(v) => patch({ emptyStateTitleText: v })}
+              />
+              <ColorField
+                label="Empty state subtitle"
+                value={theme.emptyStateSubtitleText}
+                onChange={(v) => patch({ emptyStateSubtitleText: v })}
+              />
+              <ColorField
+                label="Prompt card label"
+                value={theme.promptLabelText}
+                onChange={(v) => patch({ promptLabelText: v })}
+              />
+              <ColorField
+                label="Prompt card text"
+                value={theme.promptText}
+                onChange={(v) => patch({ promptText: v })}
+              />
+              <ColorField
+                label="Composer input text"
+                value={theme.composerInputText}
+                onChange={(v) => patch({ composerInputText: v })}
+              />
+              <ColorField
+                label="Composer disclaimer"
+                value={theme.composerDisclaimerText}
+                onChange={(v) => patch({ composerDisclaimerText: v })}
+              />
+              <ColorField
+                label="Send button text"
+                value={theme.sendButtonText}
+                onChange={(v) => patch({ sendButtonText: v })}
+              />
             </CardContent>
           </Card>
 
           {/* Background image */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Background image</CardTitle>
+              <CardTitle className="text-base">Background images</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <ImageUploadField
-                label="Chat background"
+                label="Portrait / card view"
                 kind="background"
                 value={theme.backgroundImageUrl}
                 onChange={(backgroundImageUrl) => patch({ backgroundImageUrl })}
-                hint="Shown behind the messages area. Use sharpness slider to blur."
+                hint="Shown behind messages in narrow card and mobile portrait view."
+              />
+              <ImageUploadField
+                label="Expanded view"
+                kind="background-expanded"
+                value={theme.expandedBackgroundImageUrl}
+                onChange={(expandedBackgroundImageUrl) => patch({ expandedBackgroundImageUrl })}
+                hint="Shown when chat is expanded on desktop. Falls back to portrait image if empty."
               />
               <Field label={`Background sharpness (${theme.backgroundSharpness}%)`}>
                 <input

@@ -21,7 +21,10 @@ export async function uploadChatDesignImageHandler(c: Context) {
     const file = body.file;
 
     if (typeof kindRaw !== "string" || !isUploadKind(kindRaw)) {
-      return c.json({ error: "Invalid kind. Use logo, header-banner, or background." }, 400);
+      return c.json(
+        { error: "Invalid kind. Use logo, header-banner, background, or background-expanded." },
+        400
+      );
     }
     if (!(file instanceof File)) {
       return c.json({ error: "Missing file" }, 400);

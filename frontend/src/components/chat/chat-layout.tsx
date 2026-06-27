@@ -29,6 +29,8 @@ export function ChatLayout({ children }: ChatLayoutProps) {
         )}
         <div
           className={getChatPanelClasses(viewMode.isWide, viewMode.layout)}
+          data-chat-layout={viewMode.layout}
+          data-chat-wide={viewMode.isWide ? "true" : "false"}
           style={{ backgroundColor: "var(--chat-panel-bg, #f8fafc)" }}
         >
           {children}

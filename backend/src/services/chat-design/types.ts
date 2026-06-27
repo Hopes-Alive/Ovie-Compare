@@ -20,14 +20,25 @@ export interface ChatDesignTheme {
   pageBg: string;
   headerBg: string;
   headerText: string;
+  headerSubtitleText: string;
+  bannerHeaderTitleText: string;
+  bannerHeaderSubtitleText: string;
+  emptyStateTitleText: string;
+  emptyStateSubtitleText: string;
+  promptLabelText: string;
+  promptText: string;
   composerBg: string;
   composerInputBg: string;
   composerInputText: string;
+  composerDisclaimerText: string;
   sendButtonBg: string;
   sendButtonText: string;
 
   headerBannerImageUrl: string;
+  /** Background behind messages in portrait / narrow card view */
   backgroundImageUrl: string;
+  /** Background in expanded wide view; falls back to backgroundImageUrl when empty */
+  expandedBackgroundImageUrl: string;
   /** 0 = max blur, 100 = sharp */
   backgroundSharpness: number;
 

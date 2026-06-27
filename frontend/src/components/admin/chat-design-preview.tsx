@@ -27,12 +27,12 @@ export function ChatDesignPreview({ theme }: ChatDesignPreviewProps) {
           <ChatThemeProvider theme={theme}>
             <ChatViewModeProvider value={PREVIEW_VIEW_MODE}>
               <div
-                className="relative flex h-full flex-col overflow-hidden"
+                className="chat-panel-preview relative flex h-full flex-col overflow-hidden"
                 style={{ backgroundColor: theme.pageBg }}
               >
                 <ChatBackground />
                 <div className="relative z-10 flex h-full min-h-0 flex-col">
-                  <ChatShellHeader />
+                  <ChatShellHeader preview />
                   <div className="min-h-0 flex-1 overflow-hidden">
                     <SuggestedPrompts />
                   </div>

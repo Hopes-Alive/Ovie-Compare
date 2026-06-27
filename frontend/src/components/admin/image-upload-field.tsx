@@ -10,7 +10,7 @@ import { resolveAssetUrl } from "@/lib/chat-design/asset-url";
 
 type ImageUploadFieldProps = {
   label: string;
-  kind: "logo" | "header-banner" | "background";
+  kind: "logo" | "header-banner" | "background" | "background-expanded";
   value: string;
   onChange: (url: string) => void;
   hint?: string;
@@ -132,7 +132,7 @@ export function ImageUploadField({
       <input
         ref={inputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml"
+        accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/svg+xml,.png,.jpg,.jpeg,.webp,.gif,.svg"
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
