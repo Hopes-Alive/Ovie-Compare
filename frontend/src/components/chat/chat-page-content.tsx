@@ -17,11 +17,13 @@ function createId() {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+const CHAT_SESSION_KEY = "ovie-chat-session-token";
+
 type SseEvent =
   | { type: "token"; text: string }
   | { type: "products"; products: ProductCardData[]; total: number; fallback: boolean }
   | { type: "error"; message: string }
-  | { type: "done" };
+  | { type: "done"; sessionToken?: string };
 
 export function ChatPageContent() {
   const [theme, setTheme] = useState<ChatDesignTheme>(DEFAULT_CHAT_DESIGN);
@@ -30,7 +32,12 @@ export function ChatPageContent() {
   const [isLoading, setIsLoading] = useState(false);
 
   const messagesRef = useRef<ChatMessage[]>([]);
+  const sessionTokenRef = useRef<string | null>(null);
   messagesRef.current = messages;
+
+  useEffect(() => {
+    sessionTokenRef.current = sessionStorage.getItem(CHAT_SESSION_KEY);
+  }, []);
 
   useEffect(() => {
     fetch("/api/chat-design")
@@ -70,7 +77,11 @@ export function ChatPageContent() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history }),
+        body: JSON.stringify({
+          message: text,
+          history,
+          sessionToken: sessionTokenRef.current,
+        }),
       });
 
       if (!response.ok || !response.body) {
@@ -123,6 +134,10 @@ export function ChatPageContent() {
             );
             break;
           } else if (event.type === "done") {
+            if (event.sessionToken) {
+              sessionTokenRef.current = event.sessionToken;
+              sessionStorage.setItem(CHAT_SESSION_KEY, event.sessionToken);
+            }
             break;
           }
         }
@@ -168,7 +183,13 @@ export function ChatPageContent() {
         style={{ backgroundColor: theme.pageBg }}
       >
         <ChatBackground />
-        <ChatShellHeader onNewChat={() => setMessages([])} />
+        <ChatShellHeader
+          onNewChat={() => {
+            setMessages([]);
+            sessionTokenRef.current = null;
+            sessionStorage.removeItem(CHAT_SESSION_KEY);
+          }}
+        />
 
         <ChatMessagesBackdrop>
           {isEmpty ? (
