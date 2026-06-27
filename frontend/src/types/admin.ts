@@ -48,6 +48,21 @@ export type AnalyticsMetric = {
   description?: string;
 };
 
+export type DailyCount = {
+  date: string;
+  count: number;
+};
+
+export type AnalyticsDashboardData = {
+  chatSessions7d: number;
+  chatSessions30d: number;
+  liveChecksTriggered: number;
+  priceChanges7d: number;
+  scrapeSuccessRate: number;
+  searchesByDay: DailyCount[];
+  topQueries: TopQuery[];
+};
+
 export type TopQuery = {
   rank: number;
   query: string;

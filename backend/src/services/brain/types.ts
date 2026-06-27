@@ -12,6 +12,7 @@ export interface ChatHistoryMessage {
 export interface BrainInput {
   message: string;
   history: ChatHistoryMessage[];
+  sessionId?: string;
 }
 
 /** Filters extracted by the LLM from the user's message */
@@ -110,4 +111,4 @@ export type SseEvent =
   | { type: "token"; text: string }
   | { type: "products"; products: ProductCardData[]; total: number; fallback: boolean }
   | { type: "error"; message: string }
-  | { type: "done" };
+  | { type: "done"; sessionToken?: string };

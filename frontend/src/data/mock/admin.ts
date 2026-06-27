@@ -1,11 +1,9 @@
 import type {
-  AnalyticsMetric,
   LiveCheckJobSummary,
   OverviewStats,
   ScrapeJobItem,
   ScrapeJobSummary,
   SupplierSummary,
-  TopQuery,
 } from "@/types/admin";
 
 // TODO: replace with GET /api/admin/overview
@@ -111,38 +109,6 @@ export const mockLiveCheckJobs: LiveCheckJobSummary[] = [
     changedCount: 0,
     duration: "28s",
   },
-];
-
-// TODO: replace with GET /api/admin/analytics
-export const mockAnalyticsMetrics: AnalyticsMetric[] = [
-  {
-    label: "Chat sessions (7d)",
-    value: "48",
-    description: "Unique sessions this week",
-  },
-  {
-    label: "Live checks triggered",
-    value: "23",
-    description: "From chat UI",
-  },
-  {
-    label: "Price changes (7d)",
-    value: "342",
-    description: "Detected across suppliers",
-  },
-  {
-    label: "Scrape success rate",
-    value: "98%",
-    description: "Last 30 days",
-  },
-];
-
-export const mockTopQueries: TopQuery[] = [
-  { rank: 1, query: "nitrile gloves medium", count: 23 },
-  { rank: 2, query: "composite A2", count: 18 },
-  { rank: 3, query: "sterilisation pouches", count: 14 },
-  { rank: 4, query: "disposable masks", count: 11 },
-  { rank: 5, query: "dental burs", count: 9 },
 ];
 
 // TODO: replace with GET /api/admin/jobs/:id/items

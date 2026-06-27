@@ -6,6 +6,7 @@
  */
 import { plannerTurn, answerTurn } from "./brain-conversation.js";
 import { retrieveProducts } from "./retrieval.js";
+import { logSearchEvent } from "../analytics/log-search-event.js";
 import {
   logPipelineStart,
   logPipelineEnd,
@@ -58,6 +59,14 @@ export async function* runBrainPipeline(input: BrainInput): AsyncGenerator<SseEv
       );
     }
     logStepDone(2, TOTAL_STEPS, t2());
+
+    void logSearchEvent({
+      sessionId: input.sessionId,
+      query: filters.rewritten_query || input.message,
+      supplierIds: [...new Set(searchResult.rows.map((row) => row.supplier_id))],
+      resultCount: searchResult.total,
+      latencyMs: t2(),
+    });
   } catch (err) {
     logStepError(2, TOTAL_STEPS, err);
     yield { type: "error", message: "Search failed. Please try again." };
@@ -97,4 +106,6 @@ export async function* runBrainPipeline(input: BrainInput): AsyncGenerator<SseEv
     presented: searchResult.rows.length,
     fallback: searchResult.fallback,
   });
+
+  yield { type: "done" };
 }

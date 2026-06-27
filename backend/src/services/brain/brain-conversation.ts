@@ -281,5 +281,4 @@ export async function* answerTurn(
   });
 
   yield { type: "products", products: productCards, total, fallback };
-  yield { type: "done" };
 }
