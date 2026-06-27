@@ -72,3 +72,31 @@ export function getChatPanelClasses(isWide: boolean, layout: ChatLayoutContext):
 export function shouldShowWideBackdrop(isWide: boolean, layout: ChatLayoutContext): boolean {
   return isWide && layout === "desktop";
 }
+
+/** Static view-mode snapshots for the admin design preview */
+export function getPreviewViewMode(mode: "mobile" | "desktop"): ChatViewLayoutState & {
+  setViewMode: (mode: ChatViewMode) => void;
+  toggleViewMode: () => void;
+} {
+  const noopMode = (_mode: ChatViewMode) => {};
+
+  if (mode === "mobile") {
+    return {
+      layout: "portrait-phone",
+      viewMode: "wide",
+      canToggle: false,
+      isWide: true,
+      setViewMode: noopMode,
+      toggleViewMode: () => {},
+    };
+  }
+
+  return {
+    layout: "desktop",
+    viewMode: "wide",
+    canToggle: true,
+    isWide: true,
+    setViewMode: noopMode,
+    toggleViewMode: () => {},
+  };
+}

@@ -9,7 +9,7 @@ export function AdminLayout({ children }: AdminLayoutProps) {
     <div className="flex min-h-full flex-col md:flex-row">
       <AdminSidebar />
       <main className="flex-1 overflow-auto bg-zinc-50/80 p-4 md:p-8">
-        <div className="mx-auto max-w-6xl">{children}</div>
+        <div className="mx-auto max-w-7xl">{children}</div>
       </main>
     </div>
   );
