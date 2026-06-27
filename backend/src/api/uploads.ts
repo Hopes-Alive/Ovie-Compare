@@ -22,7 +22,10 @@ export async function uploadChatDesignImageHandler(c: Context) {
 
     if (typeof kindRaw !== "string" || !isUploadKind(kindRaw)) {
       return c.json(
-        { error: "Invalid kind. Use logo, header-banner, background, or background-expanded." },
+        {
+          error:
+            "Invalid kind. Use logo, header-banner, background, background-expanded, or supplier-logo.",
+        },
         400
       );
     }
@@ -30,7 +33,14 @@ export async function uploadChatDesignImageHandler(c: Context) {
       return c.json({ error: "Missing file" }, 400);
     }
 
-    const saved = await saveChatDesignImage(kindRaw, file);
+    const supplierSlug =
+      typeof body.slug === "string" && body.slug.trim() ? body.slug.trim() : undefined;
+
+    if (kindRaw === "supplier-logo" && !supplierSlug) {
+      return c.json({ error: "Missing slug for supplier-logo upload" }, 400);
+    }
+
+    const saved = await saveChatDesignImage(kindRaw, file, supplierSlug);
     return c.json(saved);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Upload failed";

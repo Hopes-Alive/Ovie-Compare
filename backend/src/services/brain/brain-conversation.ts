@@ -14,6 +14,8 @@ import { chatClient, CHAT_MODEL } from "./llm-client.js";
 import { COLUMN_SCHEMA } from "./column-schema.js";
 import type { ChatHistoryMessage, SearchFilters, ProductRow, ProductCardData, SseEvent } from "./types.js";
 import { computeFreshness, formatLastCheckedAgo } from "./freshness.js";
+import { getSupplierDisplayName } from "../../lib/supplier-display-name.js";
+import { buildProductImageUrls } from "../../lib/product-images.js";
 
 // ---------------------------------------------------------------------------
 // Tool definition
@@ -102,15 +104,41 @@ IMPORTANT: You MUST call the searchProducts tool. Do not reply in text in this t
 const ANSWER_SYSTEM = `You are Ovie's dental supply assistant helping Australian dental clinics compare products and prices across suppliers.
 
 You will receive a JSON list of products retrieved from our database. Your job:
-1. Write a clear, helpful, conversational response based ONLY on the provided products.
+1. Write a clear, helpful response based ONLY on the provided products.
 2. Always mention prices with "AUD" and note if data was checked more than a day ago.
 3. For comparison questions, highlight key differences (price, brand, pack size, supplier).
 4. IMPORTANT: If a product has "also_available_at" entries, that means the EXACT SAME product is stocked by another supplier too. In that case, explicitly compare the prices — e.g. "Product X costs AUD 45 at Henry Schein and AUD 41 at Adam Dental — Adam Dental is cheaper by AUD 4."
 5. If the results are from a fallback search (no exact match), say: "We don't have an exact match, but here are the most similar products we carry."
 6. If results are empty, apologize and suggest the user try different search terms.
-7. Keep the response concise — 2-6 sentences. The product cards below will show full details.
+7. Keep the response concise — the product cards below will show full details.
 8. Do NOT invent prices, stock status, or product details not in the provided data.
-9. End with a single brief suggestion for follow-up if relevant (e.g. "Want me to check a live price?").`;
+9. When products were retrieved, end with a single brief line on its own (normal weight, not bold, not a question):
+   "You can check live prices anytime by clicking Check live price on the product cards below."
+   Do not offer to check prices for the user — the UI has buttons on each card. Only use a different closing line when no products were found.
+
+FORMAT your reply in Markdown. Follow these rules strictly:
+
+STRUCTURE (always):
+1. Line 1 — exactly one sentence wrapped in **bold**. This is the direct answer (max ~25 words). Nothing else on line 1.
+2. Blank line.
+3. Details — normal-weight bullet list OR 1–2 short normal paragraphs. No bold headings.
+
+WHEN TO USE **bold** (sparingly — max 4 bold phrases in the details section):
+- The opening summary sentence (line 1 only) — entire sentence in bold.
+- Supplier or product name at the START of a bullet, followed by a colon, e.g. "- **Henry Schein:** Nitrile Gloves Medium — AUD 52.00"
+- The cheaper / recommended option when comparing, e.g. "(**cheaper at Adam Dental**)" or "**best price**"
+
+WHEN NOT TO USE bold:
+- Do NOT bold prices — write them as plain AUD 52.00 or $52.00 (the UI highlights them automatically).
+- Do NOT bold whole bullet lines — only the label before the colon.
+- Do NOT bold common words, verbs, or filler text.
+- Do NOT bold the follow-up question on the last line — keep it normal weight.
+
+BULLET FORMAT for comparisons (preferred):
+- **Henry Schein:** Product Name — AUD 52.00, in stock, checked yesterday
+- **Adam Dental:** Same product — AUD 48.50, in stock (**cheaper by AUD 3.50**)
+
+Keep the response concise. Product cards below show full details.`;
 
 // ---------------------------------------------------------------------------
 // Turn 1: extract filters via tool call
@@ -179,7 +207,7 @@ export async function* answerTurn(
     url: r.supplier_product_url,
     // Cross-supplier price comparison — same canonical product at other suppliers
     also_available_at: r.canonical_alternatives?.map((alt) => ({
-      supplier: alt.supplier_name,
+      supplier: getSupplierDisplayName(alt.supplier_slug, alt.supplier_name),
       price: alt.price != null ? `${alt.price} AUD` : "price not available",
       name: alt.name,
     })) ?? [],
@@ -224,31 +252,33 @@ export async function* answerTurn(
   }
 
   // After text stream, emit the structured products payload
-  const productCards: ProductCardData[] = rows.map((r) => ({
-    id: r.id,
-    supplier: r.supplier_name,
-    name: r.name,
-    price: r.price ?? 0,
-    currency: r.currency ?? "AUD",
-    stockStatus: (r.stock_status ?? "unknown") as ProductCardData["stockStatus"],
-    deliveryText: r.delivery_text ?? "",
-    lastCheckedAt: r.last_checked_at ?? new Date().toISOString(),
-    lastCheckedAgo: formatLastCheckedAgo(r.last_checked_at),
-    freshness: computeFreshness(r.last_checked_at),
-    imageUrl: r.image_src?.split(",")[0]?.trim() || undefined,
-    imageUrls: r.image_src
-      ? r.image_src.split(",").map((u) => u.trim()).filter(Boolean)
-      : undefined,
-    url: r.supplier_product_url || undefined,
-    alternatives: r.canonical_alternatives?.map((alt) => ({
-      supplier: alt.supplier_name,
-      supplier_slug: alt.supplier_slug,
-      price: alt.price,
-      currency: alt.currency,
-      url: alt.supplier_product_url,
-      name: alt.name,
-    })),
-  }));
+  const productCards: ProductCardData[] = rows.map((r) => {
+    const imageUrls = buildProductImageUrls(r.image_src, r.supplier_slug, r.external_sku);
+    return {
+      id: r.id,
+      supplier: getSupplierDisplayName(r.supplier_slug, r.supplier_name),
+      supplier_slug: r.supplier_slug,
+      name: r.name,
+      price: r.price ?? 0,
+      currency: r.currency ?? "AUD",
+      stockStatus: (r.stock_status ?? "unknown") as ProductCardData["stockStatus"],
+      deliveryText: r.delivery_text ?? "",
+      lastCheckedAt: r.last_checked_at ?? new Date().toISOString(),
+      lastCheckedAgo: formatLastCheckedAgo(r.last_checked_at),
+      freshness: computeFreshness(r.last_checked_at),
+      imageUrl: imageUrls[0],
+      imageUrls,
+      url: r.supplier_product_url || undefined,
+      alternatives: r.canonical_alternatives?.map((alt) => ({
+        supplier: getSupplierDisplayName(alt.supplier_slug, alt.supplier_name),
+        supplier_slug: alt.supplier_slug,
+        price: alt.price,
+        currency: alt.currency,
+        url: alt.supplier_product_url,
+        name: alt.name,
+      })),
+    };
+  });
 
   yield { type: "products", products: productCards, total, fallback };
   yield { type: "done" };

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AdminPageHeader } from "@/components/admin/admin-page-header";
 import { ChatDesignPreview } from "@/components/admin/chat-design-preview";
 import { ImageUploadField } from "@/components/admin/image-upload-field";
+import { SupplierLogosEditor } from "@/components/admin/supplier-logos-editor";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -139,7 +140,7 @@ export function ChatDesignEditor() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <AdminPageHeader
           title="Chat Design"
-          description="Customize the chat page shell — header, background, colors, and empty state. Message bubbles and product cards are unchanged."
+          description="Customize the chat page shell — header, backgrounds, supplier logos, and empty state."
         />
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={handleReset}>
@@ -215,6 +216,18 @@ export function ChatDesignEditor() {
               </div>
             </CardContent>
           </Card>
+
+          <SupplierLogosEditor
+            theme={theme}
+            onLogoChange={(slug, logoUrl) =>
+              patch({
+                supplierLogos: {
+                  ...theme.supplierLogos,
+                  [slug]: logoUrl,
+                },
+              })
+            }
+          />
 
           {/* Colors */}
           <Card>

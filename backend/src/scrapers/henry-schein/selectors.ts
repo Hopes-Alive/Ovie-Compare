@@ -16,6 +16,7 @@ export const SEED_CATEGORIES = [
   },
 ];
 
-// Product image URL pattern — swap {sku} at runtime
-export const IMAGE_URL = (sku: string) =>
-  `${HENRY_SCHEIN_BASE}/Images/ProductImages/Original/${sku}.jpg`;
+import { henryScheinImageUrlsForCode } from "../../lib/product-images.js";
+
+// Product image URL pattern — Henry Schein uses /images/ProductImages/500/{sku}.jpg
+export const IMAGE_URL = (sku: string) => henryScheinImageUrlsForCode(sku)[0] ?? "";

@@ -6,6 +6,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { getSupplierDisplayName } from "@/lib/suppliers/display-name";
 import type { ProductCardData, StockStatus } from "@/types/chat";
 
 function stockLabel(status: StockStatus): string {
@@ -44,7 +45,9 @@ export function ComparisonTable({ products }: ComparisonTableProps) {
         <TableBody>
           {products.map((product) => (
             <TableRow key={product.id}>
-              <TableCell className="font-medium">{product.supplier}</TableCell>
+              <TableCell className="font-medium">
+                {getSupplierDisplayName(product.supplier_slug, product.supplier)}
+              </TableCell>
               <TableCell className="max-w-xs truncate">{product.name}</TableCell>
               <TableCell>
                 ${product.price.toFixed(2)} {product.currency}

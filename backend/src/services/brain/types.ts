@@ -82,6 +82,7 @@ export interface SearchResult {
 export interface ProductCardData {
   id: string;
   supplier: string;
+  supplier_slug?: string;
   name: string;
   price: number;
   currency: string;

@@ -55,6 +55,7 @@ export const DEFAULT_CHAT_DESIGN: ChatDesignTheme = {
       icon: "cart",
     },
   ],
+  supplierLogos: {},
 };
 
 export function resolveChatDesign(
@@ -68,6 +69,10 @@ export function resolveChatDesign(
       partial.suggestedPrompts && partial.suggestedPrompts.length > 0
         ? partial.suggestedPrompts
         : DEFAULT_CHAT_DESIGN.suggestedPrompts,
+    supplierLogos: {
+      ...DEFAULT_CHAT_DESIGN.supplierLogos,
+      ...partial.supplierLogos,
+    },
   };
 }
 

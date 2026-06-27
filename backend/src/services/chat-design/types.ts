@@ -45,6 +45,9 @@ export interface ChatDesignTheme {
   emptyStateTitle: string;
   emptyStateSubtitle: string;
   suggestedPrompts: SuggestedPromptConfig[];
+
+  /** Per-supplier logo URLs keyed by supplier slug (e.g. henry-schein) */
+  supplierLogos: Record<string, string>;
 }
 
 export type ChatDesignPatch = Partial<ChatDesignTheme>;

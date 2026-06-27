@@ -17,6 +17,7 @@
 import "dotenv/config";
 import { chromium, type Page } from "playwright";
 import { supabase } from "../lib/supabase.js";
+import { extractProductPageImageUrl } from "../lib/product-images.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -71,9 +72,14 @@ async function locatorText(
 interface DetailResult {
   description?: string;
   brand?: string;
+  imageSrc?: string;
 }
 
-async function extractDetail(page: Page, productUrl: string): Promise<DetailResult | null> {
+async function extractDetail(
+  page: Page,
+  productUrl: string,
+  supplierSlug: string
+): Promise<DetailResult | null> {
   // Skip search-fallback URLs — product detail page won't be found
   if (productUrl.includes("/search?") || productUrl.includes("ProductCode=")) return null;
 
@@ -83,9 +89,10 @@ async function extractDetail(page: Page, productUrl: string): Promise<DetailResu
 
     const description = await locatorText(page, ".widget-product-field-ProductDescription", 15);
     const brand = await locatorText(page, ".widget-product-field-CUS_BrandText", 1);
+    const imageSrc = await extractProductPageImageUrl(page, supplierSlug);
 
-    if (!description && !brand) return null;
-    return { description, brand };
+    if (!description && !brand && !imageSrc) return null;
+    return { description, brand, imageSrc };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.includes("Timeout") && !msg.includes("Navigation")) {
@@ -117,12 +124,12 @@ async function main() {
   // Target: products missing description OR missing brand with a real product URL
   let query = supabase
     .from("supplier_products")
-    .select("id, supplier_product_url, name, brand, description")
+    .select("id, supplier_product_url, name, brand, description, image_src, suppliers!inner(slug)")
     .eq("is_active", true)
     .not("supplier_product_url", "is", null)
     .not("supplier_product_url", "ilike", "%/search?%")
     .not("supplier_product_url", "ilike", "%ProductCode=%")
-    .or("description.is.null,brand.is.null");
+    .or("description.is.null,brand.is.null,image_src.is.null");
 
   if (supplierIds.length > 0) {
     query = query.in("supplier_id", supplierIds) as typeof query;
@@ -149,10 +156,12 @@ async function main() {
     for (let i = 0; i < products.length; i++) {
       const product = products[i];
       const url = product.supplier_product_url as string;
+      const supplierSlug =
+        (product.suppliers as { slug: string } | null)?.slug ?? "henry-schein";
 
       process.stdout.write(`[${i + 1}/${products.length}] ${String(product.name).slice(0, 55)}\n`);
 
-      const detail = await extractDetail(page, url);
+      const detail = await extractDetail(page, url, supplierSlug);
 
       if (!detail) {
         skipped++;
@@ -164,6 +173,7 @@ async function main() {
       const patch: Record<string, string> = {};
       if (detail.description && !product.description) patch.description = detail.description;
       if (detail.brand && !product.brand) patch.brand = detail.brand;
+      if (detail.imageSrc && !product.image_src) patch.image_src = detail.imageSrc;
 
       if (Object.keys(patch).length === 0) {
         skipped++;
@@ -181,7 +191,7 @@ async function main() {
       } else {
         enriched++;
         process.stdout.write(
-          `  → brand=${detail.brand ?? "—"} desc=${detail.description ? `"${detail.description.slice(0, 60)}..."` : "—"}\n`,
+          `  → brand=${detail.brand ?? "—"} img=${detail.imageSrc ? "yes" : "—"} desc=${detail.description ? `"${detail.description.slice(0, 60)}..."` : "—"}\n`,
         );
       }
 

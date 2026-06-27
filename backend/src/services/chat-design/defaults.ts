@@ -55,4 +55,5 @@ export const DEFAULT_CHAT_DESIGN: ChatDesignTheme = {
       icon: "cart",
     },
   ],
+  supplierLogos: {},
 };

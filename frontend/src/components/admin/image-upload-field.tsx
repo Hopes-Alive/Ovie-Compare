@@ -8,12 +8,23 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { resolveAssetUrl } from "@/lib/chat-design/asset-url";
 
+type UploadKind =
+  | "logo"
+  | "header-banner"
+  | "background"
+  | "background-expanded"
+  | "supplier-logo";
+
 type ImageUploadFieldProps = {
   label: string;
-  kind: "logo" | "header-banner" | "background" | "background-expanded";
+  kind: UploadKind;
   value: string;
   onChange: (url: string) => void;
   hint?: string;
+  /** Required when kind is supplier-logo */
+  supplierSlug?: string;
+  /** logo = square preview; banner = wide preview */
+  preview?: "logo" | "banner";
 };
 
 export function ImageUploadField({
@@ -22,12 +33,15 @@ export function ImageUploadField({
   value,
   onChange,
   hint,
+  supplierSlug,
+  preview,
 }: ImageUploadFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const displayUrl = resolveAssetUrl(value);
+  const useLogoPreview = preview === "logo" || kind === "logo";
 
   async function handleFile(file: File) {
     setUploading(true);
@@ -36,6 +50,9 @@ export function ImageUploadField({
       const form = new FormData();
       form.append("file", file);
       form.append("kind", kind);
+      if (kind === "supplier-logo" && supplierSlug) {
+        form.append("slug", supplierSlug);
+      }
 
       const res = await fetch("/api/admin/uploads", { method: "POST", body: form });
       const data = await res.json();
@@ -55,12 +72,12 @@ export function ImageUploadField({
 
       {displayUrl ? (
         <div className="relative overflow-hidden rounded-lg border border-border bg-muted/30">
-          {kind === "logo" ? (
+          {useLogoPreview ? (
             <div className="flex items-center justify-center p-4">
               <ClickableImage
                 src={displayUrl}
                 alt={label}
-                className="size-20 rounded-xl"
+                className="size-20 rounded-xl object-contain"
               />
             </div>
           ) : (

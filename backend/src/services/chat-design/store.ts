@@ -19,6 +19,10 @@ export function resolveChatDesign(partial?: Partial<ChatDesignTheme> | null): Ch
       partial.suggestedPrompts && partial.suggestedPrompts.length > 0
         ? partial.suggestedPrompts
         : DEFAULT_CHAT_DESIGN.suggestedPrompts,
+    supplierLogos: {
+      ...DEFAULT_CHAT_DESIGN.supplierLogos,
+      ...partial.supplierLogos,
+    },
   };
 }
 

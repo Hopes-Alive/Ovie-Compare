@@ -7,7 +7,13 @@ import { randomUUID } from "crypto";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 export const UPLOADS_ROOT = resolve(__dirname, "../../../uploads/chat-design");
 
-export const UPLOAD_KINDS = ["logo", "header-banner", "background", "background-expanded"] as const;
+export const UPLOAD_KINDS = [
+  "logo",
+  "header-banner",
+  "background",
+  "background-expanded",
+  "supplier-logo",
+] as const;
 export type UploadKind = (typeof UPLOAD_KINDS)[number];
 
 const ALLOWED_MIME = new Set([
@@ -58,7 +64,8 @@ function resolveFileMime(file: File): string | null {
 
 export async function saveChatDesignImage(
   kind: UploadKind,
-  file: File
+  file: File,
+  supplierSlug?: string
 ): Promise<{ path: string; url: string }> {
   const mime = resolveFileMime(file);
   if (!mime) {
@@ -70,8 +77,15 @@ export async function saveChatDesignImage(
     throw new Error("File too large (max 5 MB)");
   }
 
+  if (kind === "supplier-logo" && !supplierSlug?.trim()) {
+    throw new Error("Supplier slug is required for supplier logo uploads");
+  }
+
   const ext = EXT_BY_MIME[mime] ?? extname(file.name).toLowerCase() ?? ".png";
-  const dir = join(UPLOADS_ROOT, kind);
+  const dir =
+    kind === "supplier-logo"
+      ? join(UPLOADS_ROOT, kind, supplierSlug!.trim())
+      : join(UPLOADS_ROOT, kind);
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true });
   }
@@ -81,6 +95,9 @@ export async function saveChatDesignImage(
   const buffer = Buffer.from(await file.arrayBuffer());
   await writeFile(absolutePath, buffer);
 
-  const url = `/uploads/chat-design/${kind}/${filename}`;
+  const url =
+    kind === "supplier-logo"
+      ? `/uploads/chat-design/${kind}/${supplierSlug!.trim()}/${filename}`
+      : `/uploads/chat-design/${kind}/${filename}`;
   return { path: url, url };
 }

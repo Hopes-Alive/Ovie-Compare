@@ -14,6 +14,7 @@ export type ProductAlternative = {
 export type ProductCardData = {
   id: string;
   supplier: string;
+  supplier_slug?: string;
   name: string;
   price: number;
   currency: string;

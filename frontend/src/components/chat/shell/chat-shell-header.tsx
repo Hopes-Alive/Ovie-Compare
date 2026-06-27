@@ -28,7 +28,7 @@ export function ChatShellHeader({ onNewChat, preview = false }: ChatShellHeaderP
   const banner = hasHeaderBanner(theme);
   const bannerUrl = resolveAssetUrl(theme.headerBannerImageUrl);
 
-  const headerRef = useRef<HTMLElement>(null);
+  const bannerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const lockedContainHeightRef = useRef<number | null>(null);
   const [coverHeight, setCoverHeight] = useState<number | null>(null);
@@ -39,12 +39,12 @@ export function ChatShellHeader({ onNewChat, preview = false }: ChatShellHeaderP
 
   const syncBannerHeight = useCallback(() => {
     const img = imgRef.current;
-    const header = headerRef.current;
-    if (!img || !header || !banner || preview || isPortraitPhone) return;
+    const bannerEl = bannerRef.current;
+    if (!img || !bannerEl || !banner || preview || isPortraitPhone) return;
 
     if (useContain) {
       const measured = Math.round(img.getBoundingClientRect().height);
-      const computed = computeBannerHeight(img, header.clientWidth);
+      const computed = computeBannerHeight(img, bannerEl.clientWidth);
       const next = measured > 0 ? measured : computed;
       if (!next || next <= 0) return;
       lockedContainHeightRef.current = clampContainBannerHeight(next);
@@ -54,7 +54,7 @@ export function ChatShellHeader({ onNewChat, preview = false }: ChatShellHeaderP
 
     if (!useCover) return;
 
-    const computed = computeBannerHeight(img, header.clientWidth);
+    const computed = computeBannerHeight(img, bannerEl.clientWidth);
     setCoverHeight(
       resolveCoverBannerHeight(lockedContainHeightRef.current, computed)
     );
@@ -79,83 +79,13 @@ export function ChatShellHeader({ onNewChat, preview = false }: ChatShellHeaderP
     };
   }, [syncBannerHeight, bannerUrl, isWide]);
 
-  if (banner && bannerUrl) {
-    const layoutClass = preview
-      ? "chat-hero-preview"
-      : isPortraitPhone
-        ? "chat-hero-mobile"
-        : useContain
-          ? "chat-hero-contain"
-          : "chat-hero-cover";
-
-    const resolvedCoverHeight = resolveCoverBannerHeight(
-      lockedContainHeightRef.current,
-      coverHeight
-    );
-
-    return (
-      <header
-        ref={headerRef}
-        className={cn("chat-hero chat-hero-banner shrink-0", layoutClass)}
-        style={
-          {
-            "--chat-hero-fade-to": theme.pageBg,
-            ...(useCover
-              ? {
-                  height: resolvedCoverHeight,
-                  "--chat-hero-banner-max-height": `${resolvedCoverHeight}px`,
-                }
-              : {}),
-          } as React.CSSProperties
-        }
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img ref={imgRef} src={bannerUrl} alt="" className="chat-hero-img" />
-        <div
-          className={cn(
-            "chat-hero-profile-overlay flex items-end justify-between gap-2 px-4 pb-3",
-            useCover || preview ? "pt-4" : "pt-10"
-          )}
-        >
-          <div className="flex min-w-0 items-center gap-3">
-            <BrandAvatar onBanner />
-            <div className="min-w-0">
-              <p
-                className="truncate text-sm font-semibold"
-                style={{
-                  color: textColors.bannerHeaderTitle,
-                  textShadow: "0 1px 3px rgba(0,0,0,0.45)",
-                }}
-              >
-                {theme.brandName}
-              </p>
-              <p
-                className="line-clamp-2 text-xs leading-snug"
-                style={{
-                  color: textColors.bannerHeaderSubtitle,
-                  textShadow: "0 1px 3px rgba(0,0,0,0.45)",
-                }}
-              >
-                {theme.headerSubtitle}
-              </p>
-            </div>
-          </div>
-          <HeaderActions
-            onNewChat={onNewChat}
-            canToggle={canToggle}
-            isWide={isWide}
-            onToggleView={toggleViewMode}
-            onBanner
-          />
-        </div>
-      </header>
-    );
-  }
-
-  return (
-    <header
-      className="chat-shell-header-classic flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-4 py-3"
-      style={{ backgroundColor: theme.headerBg, color: theme.headerText }}
+  const toolbar = (
+    <div
+      className="relative z-20 flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2.5 backdrop-blur-sm"
+      style={{
+        backgroundColor: `${theme.pageBg}f2`,
+        borderColor: `${theme.primaryColor}18`,
+      }}
     >
       <div className="flex min-w-0 items-center gap-3">
         <BrandAvatar />
@@ -180,11 +110,59 @@ export function ChatShellHeader({ onNewChat, preview = false }: ChatShellHeaderP
         isWide={isWide}
         onToggleView={toggleViewMode}
       />
+    </div>
+  );
+
+  if (banner && bannerUrl) {
+    const layoutClass = preview
+      ? "chat-hero-preview"
+      : isPortraitPhone
+        ? "chat-hero-mobile"
+        : useContain
+          ? "chat-hero-contain"
+          : "chat-hero-cover";
+
+    const resolvedCoverHeight = resolveCoverBannerHeight(
+      lockedContainHeightRef.current,
+      coverHeight
+    );
+
+    return (
+      <header className="chat-hero-banner-stack relative z-20 shrink-0">
+        <div
+          ref={bannerRef}
+          className={cn("chat-hero chat-hero-banner", layoutClass)}
+          style={
+            {
+              "--chat-hero-fade-to": theme.pageBg,
+              ...(useCover
+                ? {
+                    height: resolvedCoverHeight,
+                    "--chat-hero-banner-max-height": `${resolvedCoverHeight}px`,
+                  }
+                : {}),
+            } as React.CSSProperties
+          }
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img ref={imgRef} src={bannerUrl} alt="" className="chat-hero-img" />
+        </div>
+        {toolbar}
+      </header>
+    );
+  }
+
+  return (
+    <header
+      className="chat-shell-header-classic relative z-20 shrink-0 border-b border-white/10"
+      style={{ backgroundColor: theme.headerBg, color: theme.headerText }}
+    >
+      {toolbar}
     </header>
   );
 }
 
-function BrandAvatar({ onBanner = false }: { onBanner?: boolean }) {
+function BrandAvatar() {
   const theme = useChatTheme();
   const initial = (theme.brandName || "O").slice(0, 1).toUpperCase();
   const logoUrl = resolveAssetUrl(theme.logoUrl);
@@ -195,20 +173,14 @@ function BrandAvatar({ onBanner = false }: { onBanner?: boolean }) {
       <img
         src={logoUrl}
         alt=""
-        className={cn(
-          "size-9 shrink-0 rounded-xl object-cover",
-          onBanner ? "ring-2 ring-white/90 shadow-md" : "ring-2 ring-white/20"
-        )}
+        className="size-9 shrink-0 rounded-xl object-cover ring-2 ring-white/20"
       />
     );
   }
 
   return (
     <div
-      className={cn(
-        "flex size-9 shrink-0 items-center justify-center rounded-xl text-sm font-bold text-white",
-        onBanner && "shadow-md ring-2 ring-white/90"
-      )}
+      className="flex size-9 shrink-0 items-center justify-center rounded-xl text-sm font-bold text-white"
       style={{ backgroundColor: theme.primaryColor }}
     >
       {initial}
@@ -221,28 +193,22 @@ function HeaderActions({
   canToggle,
   isWide,
   onToggleView,
-  onBanner = false,
 }: {
   onNewChat?: () => void;
   canToggle: boolean;
   isWide: boolean;
   onToggleView: () => void;
-  onBanner?: boolean;
 }) {
   const theme = useChatTheme();
 
-  const chipClass = cn(
-    "chat-action-chip flex items-center justify-center rounded-full transition-opacity hover:opacity-90",
-    onBanner && "chat-hero-action-chip"
-  );
+  const chipClass =
+    "chat-action-chip flex items-center justify-center rounded-full border transition-opacity hover:opacity-90";
 
-  const chipStyle = onBanner
-    ? undefined
-    : {
-        backgroundColor: `${theme.primaryColor}18`,
-        color: theme.headerText,
-        border: `1px solid ${theme.primaryColor}30`,
-      };
+  const chipStyle = {
+    backgroundColor: `${theme.primaryColor}14`,
+    color: theme.headerText,
+    borderColor: `${theme.primaryColor}28`,
+  };
 
   return (
     <div className="flex shrink-0 items-center gap-1.5">
@@ -263,9 +229,10 @@ function HeaderActions({
         onClick={onNewChat}
         className={cn(chipClass, "gap-1.5 px-3 py-1.5 text-xs font-medium")}
         style={chipStyle}
+        aria-label="New chat"
       >
         <PenSquare className="size-3.5" />
-        <span className="hidden sm:inline">New chat</span>
+        <span>New chat</span>
       </button>
     </div>
   );

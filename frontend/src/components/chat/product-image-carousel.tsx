@@ -1,19 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Package } from "lucide-react";
 
 import { ImageLightbox } from "@/components/ui/image-lightbox";
-import { resolveAssetUrl } from "@/lib/chat-design/asset-url";
+import { normalizeProductImageUrls } from "@/lib/products/image-url";
 import { cn } from "@/lib/utils";
 
 type ProductImageCarouselProps = {
   imageUrls?: string[];
+  supplierSlug?: string | null;
   name: string;
+  className?: string;
 };
 
-export function ProductImageCarousel({ imageUrls, name }: ProductImageCarouselProps) {
-  const images = (imageUrls ?? []).map(resolveAssetUrl).filter(Boolean);
+export function ProductImageCarousel({
+  imageUrls,
+  supplierSlug,
+  name,
+  className,
+}: ProductImageCarouselProps) {
+  const images = useMemo(
+    () => normalizeProductImageUrls(imageUrls, supplierSlug),
+    [imageUrls, supplierSlug]
+  );
   const [index, setIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [errored, setErrored] = useState<Set<number>>(new Set());
@@ -23,7 +33,12 @@ export function ProductImageCarousel({ imageUrls, name }: ProductImageCarouselPr
 
   if (validImages.length === 0) {
     return (
-      <div className="flex size-full items-center justify-center rounded-l-xl bg-muted">
+      <div
+        className={cn(
+          "flex size-full items-center justify-center bg-muted",
+          className ?? "rounded-l-xl"
+        )}
+      >
         <Package className="size-8 text-muted-foreground/50" />
       </div>
     );
@@ -44,7 +59,12 @@ export function ProductImageCarousel({ imageUrls, name }: ProductImageCarouselPr
 
   return (
     <>
-      <div className="group relative size-full overflow-hidden rounded-l-xl bg-muted">
+      <div
+        className={cn(
+          "group relative size-full overflow-hidden bg-muted",
+          className ?? "rounded-l-xl"
+        )}
+      >
         <button
           type="button"
           onClick={() => setLightboxOpen(true)}
@@ -56,6 +76,8 @@ export function ProductImageCarousel({ imageUrls, name }: ProductImageCarouselPr
             src={currentSrc}
             alt={name}
             className="size-full object-contain p-2"
+            referrerPolicy="no-referrer"
+            loading="lazy"
             onError={() => {
               const originalIdx = images.indexOf(currentSrc);
               setErrored((prev) => new Set([...prev, originalIdx]));
