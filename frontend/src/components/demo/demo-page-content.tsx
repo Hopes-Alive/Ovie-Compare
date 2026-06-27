@@ -1,114 +1,85 @@
 import Link from "next/link";
 import { ArrowRight, ExternalLink } from "lucide-react";
 
-import { AdminPageHeader } from "@/components/admin/admin-page-header";
+import { AdminPageShell } from "@/components/admin/shell/admin-page-shell";
+import { AdminPanel } from "@/components/admin/shell/admin-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { DEMO_FLOW_ORDER, DEMO_SECTIONS } from "@/config/demo";
 import { ROUTES } from "@/config/routes";
 
 export function DemoPageContent() {
   return (
-    <>
-      <AdminPageHeader
-        title="Demo hub"
-        description="Organise stakeholder demos — follow the suggested flow or jump to any screen."
-      />
-
-      <Card className="mb-8 border-emerald-200 bg-emerald-50/50">
-        <CardHeader>
-          <CardTitle className="text-base">Suggested demo flow</CardTitle>
-          <CardDescription>
-            Walk through in order: clinic entry → chat → admin ops →
-            architecture.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ol className="space-y-3">
+    <AdminPageShell
+      title="Demo hub"
+      description="Suggested walkthrough for stakeholder demos."
+    >
+      <div className="space-y-5">
+        <AdminPanel title="Suggested flow">
+          <ol className="space-y-2">
             {DEMO_FLOW_ORDER.map((item) => (
               <li key={item.step} className="flex items-center gap-3">
-                <Badge variant="outline" className="shrink-0">
+                <Badge variant="outline" className="shrink-0 tabular-nums">
                   {item.step}
                 </Badge>
-                <span className="flex-1 text-sm font-medium">{item.label}</span>
+                <span className="flex-1 text-sm">{item.label}</span>
                 <Button
                   variant="ghost"
                   size="sm"
                   render={<Link href={item.href} target="_blank" />}
                 >
                   Open
-                  <ExternalLink />
+                  <ExternalLink className="size-3.5" />
                 </Button>
               </li>
             ))}
           </ol>
-        </CardContent>
-      </Card>
+        </AdminPanel>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        {DEMO_SECTIONS.map((section) => {
-          const Icon = section.icon;
-          return (
-            <Card key={section.id}>
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Icon className="size-5 text-muted-foreground" />
-                  <CardTitle className="text-base">{section.title}</CardTitle>
-                </div>
-                <CardDescription>{section.description}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
+        <div className="grid gap-5 lg:grid-cols-2">
+          {DEMO_SECTIONS.map((section) => (
+            <AdminPanel
+              key={section.id}
+              title={section.title}
+              description={section.description}
+            >
+              <div className="space-y-2">
                 {section.steps.map((step) => (
                   <Link
                     key={step.href}
                     href={step.href}
                     target="_blank"
-                    className="group flex items-start gap-3 rounded-lg border border-border p-3 transition-colors hover:bg-muted/50"
+                    className="group flex items-start gap-3 rounded-md border border-[var(--admin-border)] px-3 py-2.5 transition-colors hover:bg-[var(--admin-bg)]"
                   >
-                    <div className="flex-1">
+                    <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium group-hover:underline">
                         {step.label}
                       </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
+                      <p className="mt-0.5 text-xs text-[var(--admin-muted)]">
                         {step.description}
                       </p>
                     </div>
-                    <ArrowRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                    <ArrowRight className="mt-0.5 size-3.5 shrink-0 text-[var(--admin-muted)]" />
                   </Link>
                 ))}
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+              </div>
+            </AdminPanel>
+          ))}
+        </div>
 
-      <Card className="mt-8">
-        <CardHeader>
-          <CardTitle className="text-base">Route map</CardTitle>
-          <CardDescription>
-            All frontend routes defined in page-structure.md
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-2 font-mono text-xs sm:grid-cols-2">
-            <div>{ROUTES.home} — Landing</div>
-            <div>{ROUTES.chat} — Chat</div>
-            <div>{ROUTES.demo} — Demo hub</div>
-            <div>{ROUTES.admin.overview} — Admin overview</div>
-            <div>{ROUTES.admin.suppliers} — Suppliers</div>
-            <div>{ROUTES.admin.analytics} — Analytics</div>
-            <div>{ROUTES.admin.jobs} — Jobs</div>
-            <div>{ROUTES.admin.architecture} — Architecture</div>
+        <AdminPanel title="Routes" contentClassName="p-4">
+          <div className="grid gap-1.5 font-mono text-xs text-[var(--admin-secondary)] sm:grid-cols-2">
+            <div>{ROUTES.home}</div>
+            <div>{ROUTES.chat}</div>
+            <div>{ROUTES.demo}</div>
+            <div>{ROUTES.admin.overview}</div>
+            <div>{ROUTES.admin.suppliers}</div>
+            <div>{ROUTES.admin.analytics}</div>
+            <div>{ROUTES.admin.jobs}</div>
+            <div>{ROUTES.admin.architecture}</div>
           </div>
-        </CardContent>
-      </Card>
-    </>
+        </AdminPanel>
+      </div>
+    </AdminPageShell>
   );
 }

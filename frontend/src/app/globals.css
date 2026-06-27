@@ -366,3 +366,18 @@
 .chat-stagger-in {
   animation: chat-stagger-in 0.35s ease-out both;
 }
+
+/* ── Admin portal ── */
+[data-admin-portal] {
+  --admin-bg: #fafafa;
+  --admin-surface: #ffffff;
+  --admin-border: #e4e4e7;
+  --admin-border-hover: #d4d4d8;
+  --admin-foreground: #18181b;
+  --admin-muted: #71717a;
+  --admin-secondary: #52525b;
+  --admin-accent: #18181b;
+  --admin-accent-soft: #f4f4f5;
+  --admin-sidebar: #fafafa;
+  --admin-sidebar-muted: #f4f4f5;
+}

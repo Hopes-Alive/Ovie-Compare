@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { AdminPageHeader } from "@/components/admin/admin-page-header";
+import { AdminPageShell } from "@/components/admin/shell/admin-page-shell";
 import { SupplierTable } from "@/components/admin/supplier-table";
 
 export const metadata: Metadata = {
@@ -9,12 +9,11 @@ export const metadata: Metadata = {
 
 export default function AdminSuppliersPage() {
   return (
-    <>
-      <AdminPageHeader
-        title="Data sources"
-        description="Connected suppliers and scrape health."
-      />
+    <AdminPageShell
+      title="Suppliers"
+      description="Connected data sources and scrape health."
+    >
       <SupplierTable />
-    </>
+    </AdminPageShell>
   );
 }

@@ -9,6 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AdminTableCard } from "@/components/admin/shell/admin-table-card";
 import { mockScrapeJobItems } from "@/data/mock/admin";
 import type { ScrapeJobItem } from "@/types/admin";
 
@@ -18,10 +19,9 @@ type JobDetailPanelProps = {
 };
 
 export function JobDetailPanel({ jobId, jobLabel }: JobDetailPanelProps) {
-  // TODO: replace with GET /api/admin/jobs/:id/items
   if (!jobId) {
     return (
-      <div className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-8 text-center text-sm text-muted-foreground">
+      <div className="rounded-lg border border-dashed border-[var(--admin-border)] px-4 py-8 text-center text-sm text-[var(--admin-muted)]">
         Select a scrape job with failures to view per-URL details.
       </div>
     );
@@ -31,33 +31,35 @@ export function JobDetailPanel({ jobId, jobLabel }: JobDetailPanelProps) {
 
   if (items.length === 0) {
     return (
-      <div className="rounded-xl border border-border bg-card px-4 py-6 text-sm text-muted-foreground">
+      <div className="rounded-lg border border-[var(--admin-border)] px-4 py-6 text-sm text-[var(--admin-muted)]">
         No item-level detail available for this job yet.
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card">
+    <AdminTableCard>
       {jobLabel && (
-        <div className="border-b border-border px-4 py-3">
-          <p className="text-sm font-medium">{jobLabel}</p>
-          <p className="text-xs text-muted-foreground">
+        <div className="border-b border-[var(--admin-border)] px-4 py-3">
+          <p className="text-[14px] font-medium text-[var(--admin-foreground)]">
+            {jobLabel}
+          </p>
+          <p className="text-[12px] text-[var(--admin-muted)]">
             Per-URL scrape results
           </p>
         </div>
       )}
       <Table>
         <TableHeader>
-          <TableRow>
-            <TableHead>URL</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Error</TableHead>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="text-[var(--admin-muted)]">URL</TableHead>
+            <TableHead className="text-[var(--admin-muted)]">Status</TableHead>
+            <TableHead className="text-[var(--admin-muted)]">Error</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {items.map((item) => (
-            <TableRow key={item.id}>
+            <TableRow key={item.id} className="hover:bg-[var(--admin-bg)]/70">
               <TableCell className="max-w-xs truncate font-mono text-xs">
                 {item.url}
               </TableCell>
@@ -68,13 +70,13 @@ export function JobDetailPanel({ jobId, jobLabel }: JobDetailPanelProps) {
                   {item.status}
                 </Badge>
               </TableCell>
-              <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
+              <TableCell className="max-w-xs truncate text-xs text-[var(--admin-muted)]">
                 {item.error ?? "—"}
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
-    </div>
+    </AdminTableCard>
   );
 }
