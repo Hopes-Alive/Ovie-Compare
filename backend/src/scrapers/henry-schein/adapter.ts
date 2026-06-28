@@ -22,6 +22,17 @@ export class HenryScheinAdapter implements SupplierAdapter {
     return buildContentHash(detail);
   }
 
+  async parseProductPage(page: Page, pageUrl: string): Promise<ProductDetail | null> {
+    await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: PAGE_TIMEOUT_MS });
+    await page.waitForTimeout(PAGE_WAIT_MS);
+    const products = await parsePageProducts(page);
+    if (products.length === 0) return null;
+    const match =
+      products.find((p) => p.url === pageUrl || pageUrl.includes(p.externalSku ?? "")) ??
+      products[0];
+    return match ?? null;
+  }
+
   /**
    * Scrape a single category using a provided Page (shared browser).
    * The caller is responsible for browser lifecycle.
@@ -29,12 +40,14 @@ export class HenryScheinAdapter implements SupplierAdapter {
   async scrapeCategoryWithPage(
     page: Page,
     categoryPath: string,
+    maxPages?: number,
   ): Promise<ProductDetail[]> {
     const results: ProductDetail[] = [];
     let pageNum = 1;
     let emptyPages = 0;
 
     while (emptyPages < 2) {
+      if (maxPages != null && pageNum > maxPages) break;
       const url =
         pageNum === 1
           ? `${HENRY_SCHEIN_BASE}${categoryPath}`

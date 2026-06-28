@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,6 @@ import {
 import { AdminTableCard } from "@/components/admin/shell/admin-table-card";
 import { SupplierDetailSheet } from "@/components/admin/supplier-detail-sheet";
 import { ROUTES } from "@/config/routes";
-import { mockSuppliers } from "@/data/mock/admin";
 import type { SupplierStatus, SupplierSummary } from "@/types/admin";
 
 function statusVariant(status: SupplierStatus) {
@@ -42,23 +41,45 @@ function statusLabel(status: SupplierStatus) {
 }
 
 export function SupplierTable() {
-  const suppliers = mockSuppliers;
+  const [suppliers, setSuppliers] = useState<SupplierSummary[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<SupplierSummary | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+
+  const loadSuppliers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/suppliers");
+      const data = (await res.json()) as { suppliers?: SupplierSummary[] };
+      setSuppliers(data.suppliers ?? []);
+    } catch {
+      setSuppliers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSuppliers();
+  }, [loadSuppliers]);
 
   function openDetail(supplier: SupplierSummary) {
     setSelected(supplier);
     setSheetOpen(true);
   }
 
+  function handleSupplierUpdated(updated: SupplierSummary) {
+    setSuppliers((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    setSelected(updated);
+  }
+
   return (
     <>
       <AdminTableCard
         footer={
-          <>
-            To add a new supplier, a scraper adapter must be deployed in the
-            codebase. Contact the dev team.
-          </>
+          loading
+            ? "Loading suppliers…"
+            : "Configure refresh intervals in supplier details. Scheduled scrapes re-crawl all discovered categories."
         }
       >
         <Table>
@@ -70,6 +91,7 @@ export function SupplierTable() {
                 Products
               </TableHead>
               <TableHead className="text-[var(--admin-muted)]">Last check</TableHead>
+              <TableHead className="text-[var(--admin-muted)]">Refresh</TableHead>
               <TableHead className="text-right text-[var(--admin-muted)]">
                 Errors (24h)
               </TableHead>
@@ -81,7 +103,7 @@ export function SupplierTable() {
           <TableBody>
             {suppliers.map((supplier) => (
               <TableRow
-                key={supplier.slug}
+                key={supplier.id}
                 className="hover:bg-[var(--admin-bg)]/70"
               >
                 <TableCell>
@@ -107,6 +129,12 @@ export function SupplierTable() {
                   {supplier.productCount > 0 ? supplier.productCount : "—"}
                 </TableCell>
                 <TableCell>{supplier.lastCheckAgo}</TableCell>
+                <TableCell className="text-xs text-[var(--admin-muted)]">
+                  Every {supplier.refreshIntervalMinutes} min
+                  {supplier.nextRefreshIn && (
+                    <span className="block">{supplier.nextRefreshIn}</span>
+                  )}
+                </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {supplier.errors24h}
                 </TableCell>
@@ -139,6 +167,7 @@ export function SupplierTable() {
         supplier={selected}
         open={sheetOpen}
         onOpenChange={setSheetOpen}
+        onUpdated={handleSupplierUpdated}
       />
     </>
   );

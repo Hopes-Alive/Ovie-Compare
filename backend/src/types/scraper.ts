@@ -30,9 +30,12 @@ export interface ScrapeStats {
   failed: number;
 }
 
+import type { Page } from "playwright";
+
 export interface SupplierAdapter {
   slug: string;
   approvedDomains: string[];
   buildContentHash(detail: ProductDetail): string;
   scrapeCategory(categoryUrl: string): Promise<ProductDetail[]>;
+  parseProductPage(page: Page, pageUrl: string): Promise<ProductDetail | null>;
 }

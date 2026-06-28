@@ -63,6 +63,7 @@ const PRODUCT_SELECT = `
   delivery_max_days,
   last_checked_at,
   last_changed_at,
+  created_at,
   supplier_product_url,
   embedding,
   suppliers!inner ( slug, name )
@@ -116,6 +117,7 @@ function toProductRow(raw: Record<string, unknown>): ProductRow & { _embedding: 
     delivery_max_days: (raw.delivery_max_days as number) ?? null,
     last_checked_at: (raw.last_checked_at as string) ?? null,
     last_changed_at: (raw.last_changed_at as string) ?? null,
+    created_at: (raw.created_at as string) ?? null,
     supplier_product_url: (raw.supplier_product_url as string) ?? null,
     _embedding: parseEmbedding(raw.embedding),
   };

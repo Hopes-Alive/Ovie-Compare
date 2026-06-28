@@ -2,15 +2,17 @@
 
 import { Check, Copy, ExternalLink } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 
 import { AdminPanel } from "@/components/admin/shell/admin-panel";
 import { AdminStatGrid } from "@/components/admin/shell/admin-stat-grid";
 import { AdminPageShell } from "@/components/admin/shell/admin-page-shell";
+import { ScrapeControlPanel } from "@/components/admin/scrape-control-panel";
 import { Button } from "@/components/ui/button";
 import { ROUTES } from "@/config/routes";
-import { mockOverviewStats } from "@/data/mock/admin";
+import { formatLastCheckedAgo } from "@/lib/freshness";
+import type { SupplierSummary } from "@/types/admin";
 
 export type OverviewSupplier = {
   slug: string;
@@ -19,19 +21,49 @@ export type OverviewSupplier = {
   is_active: boolean | null;
 };
 
+type OverviewStats = {
+  activeSuppliers: number;
+  totalProducts: number;
+  lastScrapeAt: string | null;
+  failedJobs24h: number;
+  searchesToday: number;
+};
+
 type OverviewDashboardProps = {
   chatUrl: string;
   suppliers: OverviewSupplier[];
 };
 
-export function OverviewDashboard({
-  chatUrl,
-  suppliers,
-}: OverviewDashboardProps) {
-  const stats = mockOverviewStats;
-  const activeSuppliers = suppliers.filter((s) => s.is_active);
-  const activeCount = activeSuppliers.length;
+export function OverviewDashboard({ chatUrl, suppliers: initialSuppliers }: OverviewDashboardProps) {
   const [copied, setCopied] = useState(false);
+  const [stats, setStats] = useState<OverviewStats | null>(null);
+  const [supplierSummaries, setSupplierSummaries] = useState<SupplierSummary[]>([]);
+  const [scrapeRunning, setScrapeRunning] = useState(false);
+
+  const loadOverview = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/overview");
+      const data = (await res.json()) as {
+        stats?: OverviewStats;
+        suppliers?: SupplierSummary[];
+        scrape?: { running: boolean };
+      };
+      if (data.stats) setStats(data.stats);
+      if (data.suppliers) setSupplierSummaries(data.suppliers);
+      if (data.scrape) setScrapeRunning(data.scrape.running);
+    } catch {
+      /* keep previous */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadOverview();
+  }, [loadOverview]);
+
+  const activeSuppliers =
+    supplierSummaries.length > 0
+      ? supplierSummaries.filter((s) => s.status === "active")
+      : initialSuppliers.filter((s) => s.is_active);
 
   async function handleCopy() {
     try {
@@ -55,9 +87,7 @@ export function OverviewDashboard({
       </Button>
       <Button
         size="sm"
-        render={
-          <a href={ROUTES.chat} target="_blank" rel="noopener noreferrer" />
-        }
+        render={<a href={ROUTES.chat} target="_blank" rel="noopener noreferrer" />}
       >
         <ExternalLink data-icon="inline-start" className="size-3.5" />
         Open chat
@@ -68,7 +98,7 @@ export function OverviewDashboard({
   return (
     <AdminPageShell
       title="Overview"
-      description="Summary of system health and clinic access."
+      description="Summary of system health, scheduled scraping, and clinic access."
       actions={headerActions}
     >
       <div className="space-y-5">
@@ -77,26 +107,35 @@ export function OverviewDashboard({
           stats={[
             {
               title: "Active suppliers",
-              value: activeCount || stats.activeSuppliers,
+              value: stats?.activeSuppliers ?? activeSuppliers.length,
             },
             {
               title: "Products indexed",
-              value: stats.totalProducts.toLocaleString(),
+              value: (stats?.totalProducts ?? 0).toLocaleString(),
             },
             {
               title: "Last scrape",
-              value: stats.lastScrapeAgo,
+              value: stats?.lastScrapeAt
+                ? formatLastCheckedAgo(stats.lastScrapeAt)
+                : "—",
             },
             {
               title: "Failed jobs (24h)",
-              value: stats.failedJobs24h,
-              alert: stats.failedJobs24h > 0,
+              value: stats?.failedJobs24h ?? 0,
+              alert: (stats?.failedJobs24h ?? 0) > 0,
             },
             {
               title: "Searches today",
-              value: stats.searchesToday,
+              value: stats?.searchesToday ?? 0,
             },
           ]}
+        />
+
+        <ScrapeControlPanel
+          suppliers={supplierSummaries}
+          scrapeRunning={scrapeRunning}
+          onSuppliersChange={setSupplierSummaries}
+          onRunningChange={setScrapeRunning}
         />
 
         <div className="grid gap-5 lg:grid-cols-2">
@@ -117,7 +156,7 @@ export function OverviewDashboard({
               <ul className="divide-y divide-[var(--admin-border)]">
                 {activeSuppliers.map((supplier) => (
                   <li
-                    key={supplier.slug}
+                    key={supplier.slug ?? (supplier as SupplierSummary).id}
                     className="flex items-center justify-between gap-3 px-4 py-3"
                   >
                     <div className="min-w-0">
@@ -125,11 +164,14 @@ export function OverviewDashboard({
                         {supplier.name}
                       </p>
                       <p className="truncate text-xs text-[var(--admin-muted)]">
-                        {supplier.base_url.replace(/^https?:\/\//, "")}
+                        {("websiteUrl" in supplier
+                          ? supplier.websiteUrl
+                          : supplier.base_url
+                        ).replace(/^https?:\/\//, "")}
                       </p>
                     </div>
                     <span className="shrink-0 text-xs text-[var(--admin-muted)]">
-                      Live
+                      {scrapeRunning ? "Scraping…" : "Live"}
                     </span>
                   </li>
                 ))}

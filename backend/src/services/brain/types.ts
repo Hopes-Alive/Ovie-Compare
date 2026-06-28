@@ -66,6 +66,7 @@ export interface ProductRow {
   delivery_max_days: number | null;
   last_checked_at: string | null;
   last_changed_at: string | null;
+  created_at: string | null;
   supplier_product_url: string | null;
   similarity?: number;
   /** Products from other suppliers that share the same canonical product identity */
@@ -92,6 +93,12 @@ export interface ProductCardData {
   lastCheckedAt: string;
   lastCheckedAgo: string;
   freshness: "fresh" | "moderate" | "stale";
+  createdAt: string;
+  addedAgo: string;
+  isNew: boolean;
+  priceChangeStatus: "unchanged" | "changed" | "unknown";
+  priceChangedAgo?: string;
+  previousPrice?: number;
   imageUrl?: string;
   imageUrls?: string[];
   url?: string;

@@ -40,6 +40,27 @@ function stockClass(status: StockStatus): string {
   }
 }
 
+function productMetadataLines(product: ProductCardData): string[] {
+  const lines: string[] = [];
+  if (product.isNew && product.addedAgo) {
+    lines.push(`New · added ${product.addedAgo}`);
+  }
+  if (product.priceChangeStatus === "changed" && product.priceChangedAgo) {
+    const prev =
+      product.previousPrice != null && product.previousPrice > 0
+        ? ` ($${product.previousPrice.toFixed(2)} → $${product.price.toFixed(2)})`
+        : "";
+    lines.push(`Price updated ${product.priceChangedAgo}${prev}`);
+  } else if (product.priceChangeStatus === "unchanged") {
+    lines.push(`Price unchanged · checked ${product.lastCheckedAgo}`);
+  } else if (product.lastCheckedAgo && product.lastCheckedAgo !== "unknown") {
+    lines.push(`Checked ${product.lastCheckedAgo}`);
+  } else {
+    lines.push("Not checked yet");
+  }
+  return lines;
+}
+
 type ProductCardProps = {
   product: ProductCardData;
   onPriceUpdate?: (productId: string, newPrice: number) => void;
@@ -68,6 +89,7 @@ export function ProductCard({
 
   const priceDisplay =
     product.price > 0 ? `$${product.price.toFixed(2)}` : "Price N/A";
+  const metadataLines = productMetadataLines(product);
 
   if (isCompact) {
     return (
@@ -213,9 +235,13 @@ export function ProductCard({
                   {product.currency}
                 </span>
               )}
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
-                Checked {product.lastCheckedAgo}
-              </p>
+              <div className="mt-0.5 space-y-0.5">
+                {metadataLines.map((line) => (
+                  <p key={line} className="text-[11px] text-muted-foreground">
+                    {line}
+                  </p>
+                ))}
+              </div>
             </div>
             {product.url && (
               <a

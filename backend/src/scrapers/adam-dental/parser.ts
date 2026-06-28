@@ -134,7 +134,7 @@ function parseCategoryHierarchy(raw: string | undefined): {
  * Strip tracking params (CampaignCode, SearchID, SearchPos) from a product URL.
  * Preserves the canonical slug-based path.
  */
-function cleanProductUrl(raw: string): string {
+export function cleanProductUrl(raw: string): string {
   try {
     const u = new URL(raw);
     u.searchParams.delete("CampaignCode");
@@ -199,21 +199,40 @@ export async function parsePageProducts(page: Page): Promise<ProductDetail[]> {
     return map;
   }).then((entries) => new Map(entries));
 
-  // 4. Images from DOM (data-image-src attr, relative paths)
-  const domImages: Map<string, string> = await page.evaluate(() => {
-    const map: [string, string][] = [];
-    document
-      .querySelectorAll<HTMLElement>("div[data-role='product'][data-product-code]")
-      .forEach((card) => {
+  // 4. Images — listing cards + PDP gallery (detail pages use img.src, not always data-image-src)
+  const domImages: Map<string, string> = await page
+    .evaluate(`(() => {
+      const map = new Map();
+      const add = (code, src) => {
+        if (!code || !src || !String(src).trim()) return;
+        const key = String(code).trim().toUpperCase();
+        if (!map.has(key)) map.set(key, String(src).trim());
+      };
+      const skuFromPath = (src) => {
+        const m = String(src).match(/ProductImages\\/(?:Small|Medium|Large|Original|\\d+)\\/([^./?#]+)\\./i);
+        return m ? m[1].toUpperCase() : null;
+      };
+      document.querySelectorAll("[data-role='product'][data-product-code]").forEach((card) => {
         const code = card.getAttribute("data-product-code");
-        const img = card.querySelector<HTMLImageElement>("img[data-image-src]");
-        if (code && img) {
-          const src = img.getAttribute("data-image-src") ?? img.getAttribute("src");
-          if (src) map.push([code, src]);
-        }
+        const img = card.querySelector("img");
+        const src = img?.getAttribute("data-image-src") || img?.getAttribute("src");
+        add(code, src);
       });
-    return map;
-  }).then((entries) => new Map(entries));
+      document.querySelectorAll(".product-detail-img, .widget-product-gallery img, img[itemprop='image']").forEach((img) => {
+        const src = img.getAttribute("src") || img.getAttribute("data-image-src") || img.getAttribute("data-src");
+        if (!src || !src.includes("ProductImages")) return;
+        add(img.getAttribute("alt"), src);
+        add(skuFromPath(src), src);
+      });
+      return Array.from(map.entries());
+    })()`)
+    .then((entries) => new Map(entries as [string, string][]));
+
+  const pageUrl = page.url();
+  const isSingleProductPage =
+    rawProducts.length === 1 &&
+    !pageUrl.includes("ProductSearch=") &&
+    !pageUrl.includes("/adam-dental-product-catalogue");
 
   return rawProducts
     .filter((item) => Boolean(item.Description && item.ProductCode))
@@ -223,19 +242,16 @@ export async function parsePageProducts(page: Page): Promise<ProductDetail[]> {
       const { category, subcategory } = parseCategoryHierarchy(item.CategoryHierarchy);
 
       const pricingData = productDataMap.get(sku) ?? productDataMap.get(item.ProductCode!);
-      const priceInc = cleanPrice(pricingData?.NettPriceFromFirstInc);
-      const priceEx = cleanPrice(pricingData?.NettPriceFromFirstEx);
+      const priceInc =
+        cleanPrice(pricingData?.NettPriceFromFirstInc) ?? cleanPrice(item.PriceForOneInc);
+      const priceEx =
+        cleanPrice(pricingData?.NettPriceFromFirstEx) ?? cleanPrice(item.PriceForOneEx);
 
-      // A product is login-required when:
-      //   1. No public price could be extracted, AND
-      //   2. The window.products price is "Call us!" / "login" (APHRA-restricted or members-only), OR
-      //   3. No data-product-data element exists at all for this SKU
+      // Login-required only when no price from DOM cards OR window.products (APHRA / "Call us!")
       const windowPriceRaw = (item.PriceForOneInc ?? "").toLowerCase();
       const isWindowPriceRestricted =
         windowPriceRaw.includes("call") || windowPriceRaw.includes("login") || windowPriceRaw === "";
-      const isLoginRequired =
-        priceInc === undefined &&
-        (isWindowPriceRestricted || !pricingData);
+      const isLoginRequired = priceInc === undefined && isWindowPriceRestricted;
 
       // Stock status: use AvailableQty from DOM pricing data when present
       const qty = pricingData?.AvailableQty;
@@ -249,7 +265,9 @@ export async function parsePageProducts(page: Page): Promise<ProductDetail[]> {
       const rawUrl = domLinks.get(sku) ?? domLinks.get(item.ProductCode!);
       const productUrl = rawUrl
         ? cleanProductUrl(rawUrl)
-        : `${ADAM_DENTAL_BASE}/search?ProductSearch=${encodeURIComponent(sku)}`;
+        : isSingleProductPage
+          ? cleanProductUrl(pageUrl)
+          : `${ADAM_DENTAL_BASE}/search?ProductSearch=${encodeURIComponent(sku)}`;
 
       const rawImagePath =
         domImages.get(sku) ??
