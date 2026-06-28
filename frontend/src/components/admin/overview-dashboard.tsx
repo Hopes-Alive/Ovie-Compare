@@ -39,6 +39,7 @@ export function OverviewDashboard({ chatUrl, suppliers: initialSuppliers }: Over
   const [stats, setStats] = useState<OverviewStats | null>(null);
   const [supplierSummaries, setSupplierSummaries] = useState<SupplierSummary[]>([]);
   const [scrapeRunning, setScrapeRunning] = useState(false);
+  const [scrapeStopping, setScrapeStopping] = useState(false);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -46,11 +47,14 @@ export function OverviewDashboard({ chatUrl, suppliers: initialSuppliers }: Over
       const data = (await res.json()) as {
         stats?: OverviewStats;
         suppliers?: SupplierSummary[];
-        scrape?: { running: boolean };
+        scrape?: { running: boolean; cancelRequested?: boolean };
       };
       if (data.stats) setStats(data.stats);
       if (data.suppliers) setSupplierSummaries(data.suppliers);
-      if (data.scrape) setScrapeRunning(data.scrape.running);
+      if (data.scrape) {
+        setScrapeRunning(data.scrape.running);
+        setScrapeStopping(data.scrape.running && (data.scrape.cancelRequested ?? false));
+      }
     } catch {
       /* keep previous */
     }
@@ -134,8 +138,10 @@ export function OverviewDashboard({ chatUrl, suppliers: initialSuppliers }: Over
         <ScrapeControlPanel
           suppliers={supplierSummaries}
           scrapeRunning={scrapeRunning}
+          scrapeStopping={scrapeStopping}
           onSuppliersChange={setSupplierSummaries}
           onRunningChange={setScrapeRunning}
+          onStoppingChange={setScrapeStopping}
         />
 
         <div className="grid gap-5 lg:grid-cols-2">
@@ -171,7 +177,7 @@ export function OverviewDashboard({ chatUrl, suppliers: initialSuppliers }: Over
                       </p>
                     </div>
                     <span className="shrink-0 text-xs text-[var(--admin-muted)]">
-                      {scrapeRunning ? "Scraping…" : "Live"}
+                      {scrapeStopping ? "Stopping…" : scrapeRunning ? "Scraping…" : "Live"}
                     </span>
                   </li>
                 ))}

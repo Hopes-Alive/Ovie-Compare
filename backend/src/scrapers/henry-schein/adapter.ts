@@ -65,12 +65,14 @@ export class HenryScheinAdapter implements SupplierAdapter {
     page: Page,
     categoryPath: string,
     maxPages?: number,
+    abortCheck?: () => Promise<void>,
   ): Promise<ProductDetail[]> {
     const results: ProductDetail[] = [];
     let pageNum = 1;
     let emptyPages = 0;
 
     while (emptyPages < 2) {
+      if (abortCheck) await abortCheck();
       if (maxPages != null && pageNum > maxPages) break;
       const url =
         pageNum === 1

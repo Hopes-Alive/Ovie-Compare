@@ -95,12 +95,14 @@ export class AdamDentalAdapter implements SupplierAdapter {
   async scrapeCategoryWithPage(
     page: Page,
     categoryPath: string,
+    _maxPages?: number,
+    abortCheck?: () => Promise<void>,
   ): Promise<ProductDetail[]> {
     const url = `${ADAM_DENTAL_BASE}${categoryPath}`;
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: PAGE_TIMEOUT_MS });
     await page.waitForTimeout(PAGE_WAIT_MS);
 
-    await loadAllProducts(page);
+    await loadAllProducts(page, abortCheck);
 
     const products = await parsePageProducts(page);
     return deduplicateBySku(products);
@@ -152,8 +154,13 @@ function skuMatches(product: ProductDetail | null, skuHint?: string | null): boo
  * Repeatedly clicks the "Show More Products" button until it disappears
  * or the safety cap is reached, loading all products into the DOM.
  */
-async function loadAllProducts(page: Page): Promise<void> {
+async function loadAllProducts(
+  page: Page,
+  abortCheck?: () => Promise<void>,
+): Promise<void> {
   for (let i = 0; i < MAX_SHOW_MORE_CLICKS; i++) {
+    if (abortCheck) await abortCheck();
+
     const btn = page.locator(SHOW_MORE_SELECTOR);
     const isVisible = await btn.isVisible().catch(() => false);
     if (!isVisible) break;

@@ -39,11 +39,14 @@ export type SupplierRow = {
   last_scheduled_refresh_at: string | null;
 };
 
+type AbortCheck = () => Promise<void>;
+
 type CategoryAdapter = SupplierAdapter & {
   scrapeCategoryWithPage(
     page: Page,
     categoryPath: string,
     maxPages?: number,
+    abortCheck?: AbortCheck,
   ): Promise<import("../../types/scraper.js").ProductDetail[]>;
 };
 
@@ -230,6 +233,7 @@ async function runCategoryPass(
         page,
         category.path,
         options.categoryPageLimit,
+        () => checkCancelled(jobId),
       );
       if (products.length > 0) {
         const stats = await upsertProducts({
