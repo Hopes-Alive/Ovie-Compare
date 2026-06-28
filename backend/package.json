@@ -22,6 +22,9 @@
     "embed:adam-dental": "tsx src/workers/embedding-worker.ts --supplier adam-dental",
     "apply-migrations": "tsx src/scripts/apply-pending-migrations.ts",
     "refresh": "tsx src/workers/refresh-worker.ts",
+    "probe-live-check": "tsx src/scripts/probe-live-check.ts",
+    "probe-ai-read": "tsx src/scripts/probe-ai-read.ts",
+    "probe-search": "tsx src/scripts/probe-search.ts",
     "dev:scheduler": "tsx watch src/workers/refresh-scheduler.ts",
     "start:scheduler": "tsx src/workers/refresh-scheduler.ts",
     "typecheck": "tsc --noEmit"

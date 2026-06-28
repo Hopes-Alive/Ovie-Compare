@@ -221,20 +221,33 @@ export async function parsePageProducts(page: Page): Promise<ProductDetail[]> {
         item.CategoryHierarchy,
       );
 
+      const priceInc = cleanPrice(item.PriceForOneInc);
+      const priceEx = cleanPrice(item.PriceForOneEx);
+
+      const windowPriceRaw = (item.PriceForOneInc ?? "").toLowerCase();
+      const isWindowPriceRestricted =
+        windowPriceRaw.includes("call") ||
+        windowPriceRaw.includes("login") ||
+        windowPriceRaw === "";
+      const isLoginRequired = priceInc === undefined && isWindowPriceRestricted;
+
       return {
         externalSku: sku,
         externalId: sku,
         name,
         brand: extractBrand(item.BrandText, name),
-        price: cleanPrice(item.PriceForOneInc),
-        priceExGst: cleanPrice(item.PriceForOneEx),
+        price: priceInc,
+        priceExGst: priceEx,
         stockStatus: "in_stock",  // Henry Schein listing pages don't show stock status
         url: buildProductUrl(domLinks[item.ProductCode!] ?? null, sku, pageUrl),
         imageSrc: IMAGE_URL(sku),
         category,
         subcategory,
         packSize: extractPackSize(name),
-        raw: item as unknown as Record<string, unknown>,
+        raw: {
+          ...item,
+          login_required: isLoginRequired,
+        } as unknown as Record<string, unknown>,
       };
     });
 }

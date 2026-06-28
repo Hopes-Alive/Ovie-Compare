@@ -21,10 +21,15 @@ type ExistingRow = {
 export type UpsertProductsOptions = {
   supplierId: string;
   products: ProductDetail[];
-  jobId: string;
   buildContentHash: (detail: ProductDetail) => string;
+  /** Scrape job id — used for scrape_job_items and price_history.scrape_job_id */
+  jobId?: string;
+  /** Live check job id — sets price_history.live_check_job_id; skips scrape_job_items */
+  liveCheckJobId?: string;
+  /** When set (live check), update this row by id instead of resolving by URL */
+  existingProductId?: string;
   /** Defaults to "scheduled" for refresh jobs; seeds may pass "manual" */
-  priceHistorySource?: "scheduled" | "live_check" | "manual";
+  priceHistorySource?: "scheduled" | "live_check" | "manual" | "ai_read";
 };
 
 export type UpsertProductsResult = ScrapeStats & {
@@ -101,19 +106,24 @@ function buildSurgicalUpdatePatch(
   const patch: Record<string, unknown> = {
     content_hash: contentHash,
     last_checked_at: now,
-    last_changed_at: now,
     last_seen_at: now,
   };
 
   if (product.name !== existing.name) patch.name = product.name;
 
-  if (pricesDiffer(existing.price, product.price)) {
-    patch.price = product.price ?? null;
+  if (product.price != null && product.price > 0 && pricesDiffer(existing.price, product.price)) {
+    patch.price = product.price;
   }
 
   const stock = product.stockStatus ?? "unknown";
   if (stock !== (existing.stock_status ?? "unknown")) {
-    patch.stock_status = stock;
+    const wouldDowngradeToUnknown =
+      stock === "unknown" &&
+      existing.stock_status != null &&
+      existing.stock_status !== "unknown";
+    if (!wouldDowngradeToUnknown) {
+      patch.stock_status = stock;
+    }
   }
 
   if ((product.packSize ?? null) !== (existing.pack_size ?? null)) {
@@ -155,7 +165,35 @@ function buildSurgicalUpdatePatch(
     patch.raw_snapshot = product.raw;
   }
 
+  const hasDataChanges = TRACKED_DATA_FIELDS.some((field) => field in patch);
+  if (hasDataChanges || mergedMetaJson !== existingMetaJson) {
+    patch.last_changed_at = now;
+  }
+
   return patch;
+}
+
+/** True when scraped values differ from the DB row (includes fields outside content_hash). */
+function scrapedDataDiffers(
+  existing: ExistingRow,
+  product: ProductDetail,
+  contentHash: string,
+): boolean {
+  if (existing.content_hash !== contentHash) return true;
+
+  if (product.price != null && pricesDiffer(existing.price, product.price)) return true;
+  if ((product.stockStatus ?? "unknown") !== (existing.stock_status ?? "unknown")) return true;
+  if (product.name !== existing.name) return true;
+  if ((product.packSize ?? null) !== (existing.pack_size ?? null)) return true;
+  if (product.url !== existing.supplier_product_url) return true;
+  if (product.brand != null && product.brand !== (existing.brand ?? null)) return true;
+  if (product.category != null && product.category !== (existing.category ?? null)) return true;
+  if (product.subcategory != null && product.subcategory !== (existing.subcategory ?? null)) return true;
+  if (product.description != null && product.description !== (existing.description ?? null)) return true;
+  if (product.imageSrc != null && product.imageSrc !== (existing.image_src ?? null)) return true;
+
+  const mergedMeta = mergeMetadata(existing.metadata, product);
+  return JSON.stringify(mergedMeta ?? {}) !== JSON.stringify(existing.metadata ?? {});
 }
 
 const CHANGE_LABELS: Record<string, string> = {
@@ -180,6 +218,19 @@ const INTERNAL_PATCH_KEYS = new Set([
   "external_id",
   "external_sku",
 ]);
+
+const TRACKED_DATA_FIELDS = [
+  "name",
+  "price",
+  "stock_status",
+  "pack_size",
+  "brand",
+  "category",
+  "subcategory",
+  "description",
+  "image_src",
+  "supplier_product_url",
+] as const;
 
 function formatChangeValue(field: string, value: unknown): string {
   if (value == null || value === "") return "—";
@@ -250,9 +301,16 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
     supplierId,
     products,
     jobId,
+    liveCheckJobId,
+    existingProductId,
     buildContentHash,
     priceHistorySource = "scheduled",
   } = options;
+
+  const trackScrapeJobItems = Boolean(jobId) && !liveCheckJobId;
+  const isUserTriggeredRefresh =
+    Boolean(liveCheckJobId) &&
+    (priceHistorySource === "live_check" || priceHistorySource === "ai_read");
 
   const stats: UpsertProductsResult = {
     found: products.length,
@@ -309,7 +367,21 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
     }
   }
 
+  let pinnedExisting: ExistingRow | undefined;
+  if (existingProductId) {
+    const { data: pinnedRow, error: pinnedErr } = await supabase
+      .from("supplier_products")
+      .select(selectCols)
+      .eq("id", existingProductId)
+      .eq("supplier_id", supplierId)
+      .maybeSingle();
+
+    if (pinnedErr) throw pinnedErr;
+    pinnedExisting = (pinnedRow as ExistingRow | null) ?? undefined;
+  }
+
   function resolveExisting(product: ProductDetail): ExistingRow | undefined {
+    if (pinnedExisting) return pinnedExisting;
     const byUrl = existingByUrl.get(product.url);
     if (byUrl) return byUrl;
     if (product.externalId) return existingByExternalId.get(product.externalId);
@@ -374,25 +446,36 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
           ? [{ field: "price", label: "Price", from: "—", to: formatChangeValue("price", product.price) }]
           : [],
       });
-      jobItems.push({
-        scrape_job_id: jobId,
-        url: product.url,
-        status: "success",
-        action: "created",
-      });
-    } else if (existing.content_hash !== contentHash) {
+      if (trackScrapeJobItems && jobId) {
+        jobItems.push({
+          scrape_job_id: jobId,
+          url: product.url,
+          status: "success",
+          action: "created",
+        });
+      }
+    } else if (
+      isUserTriggeredRefresh
+        ? scrapedDataDiffers(existing, product, contentHash)
+        : existing.content_hash !== contentHash
+    ) {
       if (textFieldsChanged(existing, product)) {
         stats.needsEmbedding++;
       }
-      if (pricesDiffer(existing.price, product.price)) {
-        priceHistoryRows.push({
+      if (product.price != null && pricesDiffer(existing.price, product.price)) {
+        const historyRow: Record<string, unknown> = {
           supplier_product_id: existing.id,
           old_price: existing.price,
-          new_price: product.price ?? null,
+          new_price: product.price,
           changed_at: now,
           source: priceHistorySource,
-          scrape_job_id: jobId,
-        });
+        };
+        if (liveCheckJobId) {
+          historyRow.live_check_job_id = liveCheckJobId;
+        } else if (jobId) {
+          historyRow.scrape_job_id = jobId;
+        }
+        priceHistoryRows.push(historyRow);
       }
       toUpdate.push({
         id: existing.id,
@@ -410,12 +493,14 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
         newPrice: product.price ?? null,
         changes,
       });
-      jobItems.push({
-        scrape_job_id: jobId,
-        url: product.url,
-        status: "success",
-        action: "updated",
-      });
+      if (trackScrapeJobItems && jobId) {
+        jobItems.push({
+          scrape_job_id: jobId,
+          url: product.url,
+          status: "success",
+          action: "updated",
+        });
+      }
     } else {
       if (!existing.image_src && product.imageSrc) {
         toBackfillImage.push({ id: existing.id, url: product.url, imageSrc: product.imageSrc });
@@ -429,12 +514,14 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
         action: "unchanged",
         newPrice: existing.price,
       });
-      jobItems.push({
-        scrape_job_id: jobId,
-        url: product.url,
-        status: "success",
-        action: "unchanged",
-      });
+      if (trackScrapeJobItems && jobId) {
+        jobItems.push({
+          scrape_job_id: jobId,
+          url: product.url,
+          status: "success",
+          action: "unchanged",
+        });
+      }
     }
   }
 
@@ -503,7 +590,7 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
     }
   }
 
-  if (jobItems.length > 0) {
+  if (trackScrapeJobItems && jobItems.length > 0) {
     await supabase.from("scrape_job_items").insert(jobItems);
   }
 

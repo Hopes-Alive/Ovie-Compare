@@ -12,7 +12,7 @@ import type { ChatMessage, ProductCardData } from "@/types/chat";
 type MessageBubbleProps = {
   message: ChatMessage;
   products?: ProductCardData[];
-  onPriceUpdate?: (productId: string, newPrice: number) => void;
+  onProductUpdate?: (productId: string, updates: Partial<ProductCardData>) => void;
   isStreaming?: boolean;
 };
 
@@ -24,7 +24,7 @@ function lowestPrice(products: ProductCardData[]): number | null {
 export function MessageBubble({
   message,
   products,
-  onPriceUpdate,
+  onProductUpdate,
   isStreaming,
 }: MessageBubbleProps) {
   const compact = useChatPanelCompact();
@@ -84,7 +84,7 @@ export function MessageBubble({
                 products={displayProducts!}
                 stats={stats}
                 cheapestGroupKey={cheapestGroupKey}
-                onPriceUpdate={onPriceUpdate}
+                onProductUpdate={onProductUpdate}
               />
             </div>
           )}
@@ -98,8 +98,8 @@ export function MessageBubble({
             >
               <p className="text-[11px] text-muted-foreground">
                 Prices in {stats?.currency ?? "AUD"} · sourced from supplier catalogues · use{" "}
-                <span className="font-medium text-foreground/80">Check live price</span> to
-                refresh
+                <span className="font-medium text-foreground/80">Check current status</span> to
+                refresh price and stock
               </p>
             </div>
           )}

@@ -1,6 +1,12 @@
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
-import type { ProductDetail, SupplierAdapter } from "../../types/scraper.js";
+import type { ParseProductPageOptions, ProductDetail, SupplierAdapter } from "../../types/scraper.js";
 import { buildContentHash } from "../base-adapter.js";
+import {
+  categoryPathFromProduct,
+  extractProductCodeFromUrl,
+  hasValidPrice,
+  pickProductMatch,
+} from "../parse-product-helpers.js";
 import { parsePageProducts, cleanProductUrl } from "./parser.js";
 import { ADAM_DENTAL_BASE, SHOW_MORE_SELECTOR } from "./selectors.js";
 
@@ -17,6 +23,16 @@ const BROWSER_CONTEXT_OPTIONS = {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 };
 
+function isCategoryListingUrl(url: string, categoryPath: string): boolean {
+  try {
+    const pathname = new URL(url).pathname.replace(/\/$/, "");
+    const normalizedCategory = categoryPath.replace(/\/$/, "");
+    return pathname === normalizedCategory;
+  } catch {
+    return false;
+  }
+}
+
 export class AdamDentalAdapter implements SupplierAdapter {
   slug = "adam-dental";
   approvedDomains = ["www.adamdental.com.au", "adamdental.com.au"];
@@ -25,20 +41,50 @@ export class AdamDentalAdapter implements SupplierAdapter {
     return buildContentHash(detail);
   }
 
-  async parseProductPage(page: Page, pageUrl: string): Promise<ProductDetail | null> {
-    await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: PAGE_TIMEOUT_MS });
+  async parseProductPage(
+    page: Page,
+    pageUrl: string,
+    options?: ParseProductPageOptions,
+  ): Promise<ProductDetail | null> {
+    const canonicalUrl = cleanProductUrl(pageUrl);
+    const skuHint = options?.externalSku ?? extractProductCodeFromUrl(pageUrl);
+
+    // 1) Product detail page — stock/name; price often hidden ("Call us!") on APHRA items.
+    let match = await this.loadAndParse(page, canonicalUrl, skuHint);
+    match = finalizeAdamMatch(match, canonicalUrl);
+    if (hasValidPrice(match)) return match;
+
+    // 2) Category listing — same path as seed scrape (data-product-data has NettPriceFromFirstInc).
+    const categoryPath = categoryPathFromProduct(match);
+    if (categoryPath && skuHint && !isCategoryListingUrl(canonicalUrl, categoryPath)) {
+      const categoryUrl = `${ADAM_DENTAL_BASE}${categoryPath}`;
+      const categoryMatch = await this.loadAndParse(page, categoryUrl, skuHint);
+      const resolved = finalizeAdamMatch(categoryMatch, canonicalUrl);
+      if (hasValidPrice(resolved) && skuMatches(resolved, skuHint)) return resolved;
+      if (resolved && skuMatches(resolved, skuHint) && !match) match = resolved;
+    }
+
+    // 3) Search listing fallback.
+    if (skuHint && !pageUrl.includes("ProductSearch=")) {
+      const searchUrl = `${ADAM_DENTAL_BASE}/search?ProductSearch=${encodeURIComponent(skuHint)}`;
+      const listingMatch = await this.loadAndParse(page, searchUrl, skuHint);
+      const resolved = finalizeAdamMatch(listingMatch, canonicalUrl);
+      if (hasValidPrice(resolved) && skuMatches(resolved, skuHint)) return resolved;
+      if (resolved && skuMatches(resolved, skuHint) && !match) match = resolved;
+    }
+
+    return match;
+  }
+
+  private async loadAndParse(
+    page: Page,
+    url: string,
+    skuHint?: string | null,
+  ): Promise<ProductDetail | null> {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: PAGE_TIMEOUT_MS });
     await page.waitForTimeout(PAGE_WAIT_MS);
     const products = await parsePageProducts(page);
-    if (products.length === 0) return null;
-    const match =
-      products.find((p) => p.url === pageUrl || pageUrl.includes(p.externalSku ?? "")) ??
-      products[0];
-    if (!match) return null;
-    // Product detail pages expose price in window.products but not in listing-card data attrs
-    if (!pageUrl.includes("ProductSearch=")) {
-      return { ...match, url: cleanProductUrl(pageUrl) };
-    }
-    return match;
+    return pickProductMatch(products, url, skuHint);
   }
 
   /**
@@ -84,6 +130,22 @@ export class AdamDentalAdapter implements SupplierAdapter {
     const context = await browser.newContext(BROWSER_CONTEXT_OPTIONS);
     return { browser, context };
   }
+}
+
+function finalizeAdamMatch(
+  match: ProductDetail | null,
+  canonicalUrl: string,
+): ProductDetail | null {
+  if (!match) return null;
+  if (!canonicalUrl.includes("ProductSearch=")) {
+    return { ...match, url: canonicalUrl };
+  }
+  return match;
+}
+
+function skuMatches(product: ProductDetail | null, skuHint?: string | null): boolean {
+  if (!product || !skuHint) return Boolean(product);
+  return product.externalSku?.trim().toUpperCase() === skuHint.trim().toUpperCase();
 }
 
 /**

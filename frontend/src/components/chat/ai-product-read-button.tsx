@@ -1,16 +1,16 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 import { useCallback, useState } from "react";
 
-import { LiveCheckProgress } from "@/components/chat/live-check-progress";
+import { AiReadProgress } from "@/components/chat/ai-read-progress";
 import { Button } from "@/components/ui/button";
-import { SCRAPE_STATUS_CHECK_LABEL } from "@/lib/chat/product-check-labels";
-import type { LiveCheckState, ProductCardData, StockStatus } from "@/types/chat";
+import { AI_STATUS_CHECK_LABEL } from "@/lib/chat/product-check-labels";
+import type { AiReadState, ProductCardData, StockStatus } from "@/types/chat";
 
 const CHAT_SESSION_KEY = "ovie-chat-session-token";
 
-type LiveCheckSseEvent =
+type AiReadSseEvent =
   | { type: "progress"; supplier: string; index: number; total: number }
   | {
       type: "result";
@@ -23,11 +23,12 @@ type LiveCheckSseEvent =
       fieldsChanged?: string[];
       changes?: { label: string; from: string; to: string }[];
       loginRequired?: boolean;
+      aiNotes?: string;
     }
   | { type: "error"; message: string; productId?: string }
   | { type: "done"; summary: { changed: number; unchanged: number; failed: number } };
 
-type LiveCheckButtonProps = {
+type AiProductReadButtonProps = {
   product: ProductCardData;
   onProductUpdate?: (productId: string, updates: Partial<ProductCardData>) => void;
 };
@@ -40,18 +41,18 @@ function mapStockStatus(value: string | undefined): StockStatus | undefined {
   return undefined;
 }
 
-export function LiveCheckButton({ product, onProductUpdate }: LiveCheckButtonProps) {
-  const [state, setState] = useState<LiveCheckState>({ phase: "idle" });
+export function AiProductReadButton({ product, onProductUpdate }: AiProductReadButtonProps) {
+  const [state, setState] = useState<AiReadState>({ phase: "idle" });
   const isRunning = state.phase !== "idle" && state.phase !== "result" && state.phase !== "error";
 
-  const runLiveCheck = useCallback(async () => {
+  const runAiRead = useCallback(async () => {
     setState({ phase: "checking" });
 
     const sessionToken =
       typeof window !== "undefined" ? sessionStorage.getItem(CHAT_SESSION_KEY) : null;
 
     try {
-      const response = await fetch("/api/live-check", {
+      const response = await fetch("/api/ai-product-read", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -76,7 +77,7 @@ export function LiveCheckButton({ product, onProductUpdate }: LiveCheckButtonPro
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let finalState: LiveCheckState | null = null;
+      let finalState: AiReadState | null = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -91,9 +92,9 @@ export function LiveCheckButton({ product, onProductUpdate }: LiveCheckButtonPro
           const raw = line.slice(6).trim();
           if (!raw) continue;
 
-          let event: LiveCheckSseEvent;
+          let event: AiReadSseEvent;
           try {
-            event = JSON.parse(raw) as LiveCheckSseEvent;
+            event = JSON.parse(raw) as AiReadSseEvent;
           } catch {
             continue;
           }
@@ -146,7 +147,7 @@ export function LiveCheckButton({ product, onProductUpdate }: LiveCheckButtonPro
       if (finalState) {
         setState(finalState);
       } else {
-        setState({ phase: "error", message: "Status check finished without a result" });
+        setState({ phase: "error", message: "AI read finished without a result" });
       }
     } catch (err) {
       setState({
@@ -164,13 +165,17 @@ export function LiveCheckButton({ product, onProductUpdate }: LiveCheckButtonPro
       <Button
         variant="outline"
         size="sm"
-        onClick={() => void runLiveCheck()}
+        onClick={() => void runAiRead()}
         disabled={isRunning}
       >
-        {isRunning && <Loader2 className="animate-spin" data-icon="inline-start" />}
-        {SCRAPE_STATUS_CHECK_LABEL}
+        {isRunning ? (
+          <Loader2 className="animate-spin" data-icon="inline-start" />
+        ) : (
+          <Sparkles className="text-violet-600" data-icon="inline-start" />
+        )}
+        {AI_STATUS_CHECK_LABEL}
       </Button>
-      <LiveCheckProgress state={state} />
+      <AiReadProgress state={state} />
     </div>
   );
 }

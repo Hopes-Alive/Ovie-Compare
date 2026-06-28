@@ -45,13 +45,39 @@ export type ChatMessage = {
   products?: ProductCardData[];
 };
 
+export type ProductCheckFieldChange = {
+  label: string;
+  from: string;
+  to: string;
+};
+
 export type LiveCheckState =
   | { phase: "idle" }
   | { phase: "checking" }
   | { phase: "progress"; supplier: string }
   | {
       phase: "result";
-      result: "unchanged" | "changed";
-      oldPrice: number;
-      newPrice: number;
-    };
+      result: "unchanged" | "changed" | "login_required";
+      oldPrice: number | null;
+      newPrice: number | null;
+      stockStatus?: string | null;
+      fieldsChanged?: string[];
+      changes?: ProductCheckFieldChange[];
+    }
+  | { phase: "error"; message: string };
+
+/** AI product read button state — mirrors live check phases */
+export type AiReadState =
+  | { phase: "idle" }
+  | { phase: "checking" }
+  | { phase: "progress"; supplier: string }
+  | {
+      phase: "result";
+      result: "unchanged" | "changed" | "login_required";
+      oldPrice: number | null;
+      newPrice: number | null;
+      stockStatus?: string | null;
+      fieldsChanged?: string[];
+      changes?: ProductCheckFieldChange[];
+    }
+  | { phase: "error"; message: string };

@@ -1,18 +1,18 @@
-import type { LiveCheckState } from "@/types/chat";
+import type { AiReadState } from "@/types/chat";
 
 import { ProductCheckResultPanel } from "@/components/chat/product-check-result-panel";
 
-export type LiveCheckProgressProps = {
-  state: LiveCheckState;
+export type AiReadProgressProps = {
+  state: AiReadState;
 };
 
-export function LiveCheckProgress({ state }: LiveCheckProgressProps) {
+export function AiReadProgress({ state }: AiReadProgressProps) {
   if (state.phase === "idle") return null;
 
   if (state.phase === "checking") {
     return (
       <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        Checking supplier website for current price and stock… usually 5–10 seconds
+        Loading page and analyzing with AI… usually 10–20 seconds
       </div>
     );
   }
@@ -20,7 +20,7 @@ export function LiveCheckProgress({ state }: LiveCheckProgressProps) {
   if (state.phase === "progress") {
     return (
       <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        Checking {state.supplier}…
+        Reading {state.supplier} with AI…
       </div>
     );
   }
@@ -35,7 +35,7 @@ export function LiveCheckProgress({ state }: LiveCheckProgressProps) {
 
   return (
     <ProductCheckResultPanel
-      variant="live"
+      variant="ai"
       result={state.result}
       changes={state.changes}
       oldPrice={state.oldPrice}

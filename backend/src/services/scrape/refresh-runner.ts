@@ -312,7 +312,7 @@ async function runUrlPass(
 
   const { data: staleRows, error } = await supabase
     .from("supplier_products")
-    .select("id, supplier_product_url, name")
+    .select("id, supplier_product_url, name, external_sku")
     .eq("supplier_id", supplier.id)
     .eq("is_active", true)
     .or(`last_checked_at.is.null,last_checked_at.lt.${cycleStartedAt}`)
@@ -346,7 +346,9 @@ async function runUrlPass(
     const label = (row.name as string)?.slice(0, 60) ?? url;
 
     try {
-      const product = await adapter.parseProductPage(page, url);
+      const product = await adapter.parseProductPage(page, url, {
+        externalSku: row.external_sku as string | null,
+      });
       if (!product) {
         stats.failed++;
         await appendScrapeLog(jobId, "error", `[${supplier.slug}]   ✗ ${label} — parse failed`, {

@@ -32,10 +32,18 @@ export interface ScrapeStats {
 
 import type { Page } from "playwright";
 
+export type ParseProductPageOptions = {
+  externalSku?: string | null;
+};
+
 export interface SupplierAdapter {
   slug: string;
   approvedDomains: string[];
   buildContentHash(detail: ProductDetail): string;
   scrapeCategory(categoryUrl: string): Promise<ProductDetail[]>;
-  parseProductPage(page: Page, pageUrl: string): Promise<ProductDetail | null>;
+  parseProductPage(
+    page: Page,
+    pageUrl: string,
+    options?: ParseProductPageOptions,
+  ): Promise<ProductDetail | null>;
 }

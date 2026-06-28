@@ -6,6 +6,7 @@ import { useState } from "react";
 import { BestPriceBadge } from "@/components/chat/best-price-badge";
 import { FreshnessBadge } from "@/components/chat/freshness-badge";
 import { LiveCheckButton } from "@/components/chat/live-check-button";
+import { AiProductReadButton } from "@/components/chat/ai-product-read-button";
 import { ProductAlternativeComparison } from "@/components/chat/product-alternative-comparison";
 import { ProductImageCarousel } from "@/components/chat/product-image-carousel";
 import { SupplierBadge } from "@/components/chat/supplier-badge";
@@ -63,7 +64,7 @@ function productMetadataLines(product: ProductCardData): string[] {
 
 type ProductCardProps = {
   product: ProductCardData;
-  onPriceUpdate?: (productId: string, newPrice: number) => void;
+  onProductUpdate?: (productId: string, updates: Partial<ProductCardData>) => void;
   showSupplierBadge?: boolean;
   variant?: "default" | "embedded";
   supplierSlug?: string | null;
@@ -73,7 +74,7 @@ type ProductCardProps = {
 
 export function ProductCard({
   product,
-  onPriceUpdate,
+  onProductUpdate,
   showSupplierBadge = true,
   variant = "default",
   supplierSlug,
@@ -305,7 +306,10 @@ export function ProductCard({
           isEmbedded ? theme.headerBorder : "border-border/60"
         )}
       >
-        <LiveCheckButton product={product} onPriceUpdate={onPriceUpdate} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <LiveCheckButton product={product} onProductUpdate={onProductUpdate} />
+          <AiProductReadButton product={product} onProductUpdate={onProductUpdate} />
+        </div>
       </div>
     </article>
   );

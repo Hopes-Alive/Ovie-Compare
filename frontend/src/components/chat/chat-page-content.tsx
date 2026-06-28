@@ -155,8 +155,8 @@ export function ChatPageContent() {
     }
   }, []);
 
-  const handlePriceUpdate = useCallback(
-    (productId: string, newPrice: number) => {
+  const handleProductUpdate = useCallback(
+    (productId: string, updates: Partial<ProductCardData>) => {
       setProductOverrides((prev) => {
         const base =
           prev[productId] ??
@@ -166,9 +166,7 @@ export function ChatPageContent() {
           ...prev,
           [productId]: {
             ...base,
-            price: newPrice,
-            lastCheckedAgo: "just now",
-            freshness: "fresh",
+            ...updates,
           },
         };
       });
@@ -198,7 +196,7 @@ export function ChatPageContent() {
             <MessageList
               messages={messages}
               productOverrides={productOverrides}
-              onPriceUpdate={handlePriceUpdate}
+              onProductUpdate={handleProductUpdate}
               isLoading={isLoading}
             />
           )}
