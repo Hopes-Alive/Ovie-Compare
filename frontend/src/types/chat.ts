@@ -23,6 +23,12 @@ export type ProductCardData = {
   lastCheckedAt: string;
   lastCheckedAgo: string;
   freshness: Freshness;
+  createdAt?: string;
+  addedAgo?: string;
+  isNew?: boolean;
+  priceChangeStatus?: "unchanged" | "changed" | "unknown";
+  priceChangedAgo?: string;
+  previousPrice?: number;
   imageUrl?: string;
   imageUrls?: string[];
   url?: string;

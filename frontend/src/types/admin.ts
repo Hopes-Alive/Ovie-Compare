@@ -9,6 +9,7 @@ export type OverviewStats = {
 };
 
 export type SupplierSummary = {
+  id: string;
   slug: string;
   name: string;
   websiteUrl: string;
@@ -19,6 +20,10 @@ export type SupplierSummary = {
   errors24h: number;
   scrapeEnabled: boolean;
   liveCheckEnabled: boolean;
+  refreshIntervalMinutes: number;
+  lastScheduledRefreshAt: string | null;
+  lastRefreshAgo: string;
+  nextRefreshIn: string | null;
 };
 
 export type ScrapeJobSummary = {
@@ -26,9 +31,11 @@ export type ScrapeJobSummary = {
   startedAt: string;
   supplier: string;
   type: "seed" | "refresh";
-  status: "completed" | "running" | "failed";
+  status: "completed" | "running" | "failed" | "partial";
   found: number;
+  created: number;
   updated: number;
+  unchanged: number;
   failed: number;
   duration: string;
 };
@@ -72,6 +79,7 @@ export type TopQuery = {
 export type ScrapeJobItem = {
   id: string;
   url: string;
-  status: "success" | "failed";
+  status: "success" | "failed" | "skipped";
+  action?: "created" | "updated" | "unchanged" | "deactivated";
   error?: string;
 };

@@ -54,8 +54,12 @@ export function ComparisonTable({ products }: ComparisonTableProps) {
               </TableCell>
               <TableCell>{stockLabel(product.stockStatus)}</TableCell>
               <TableCell>{product.deliveryText}</TableCell>
-              <TableCell className="text-muted-foreground">
-                {product.lastCheckedAgo}
+              <TableCell className="text-muted-foreground text-xs">
+                {product.isNew && product.addedAgo
+                  ? `New · ${product.addedAgo}`
+                  : product.priceChangeStatus === "changed" && product.priceChangedAgo
+                    ? `Updated ${product.priceChangedAgo}`
+                    : product.lastCheckedAgo}
               </TableCell>
             </TableRow>
           ))}

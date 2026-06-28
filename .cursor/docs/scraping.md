@@ -133,24 +133,49 @@ backend/src/scrapers/
 
 ---
 
-## Scheduled refresh flow
+## Scheduled refresh flow (implemented)
+
+Admin-configurable interval per supplier (`suppliers.refresh_interval_minutes`, default 6h).
 
 ```
-Cron → enqueue refresh job
-  → select products WHERE last_checked_at < now() - interval
-     ORDER BY scrape_priority, last_checked_at
-     LIMIT batch_size
+refresh-scheduler (every 60s)
+  → if supplier due AND no running refresh job:
+       refresh-worker
+         Pass A: re-crawl all discovered categories (data/*-categories.json)
+           → upsertProducts (created / updated / unchanged + price_history)
+         Pass B: per-URL check for products missed in Pass A
+           → parseProductPage → upsertProducts
+         → update last_scheduled_refresh_at (success, cancel, or failure)
+```
 
-  For each product:
-    1. HTTP GET or Playwright if JS-required
-    2. parseProductPage
-    3. new_hash = buildContentHash(detail)
-    4. If new_hash == content_hash:
-         UPDATE last_checked_at only
-    5. Else:
-         UPDATE fields, content_hash, last_changed_at
-         INSERT price_history if price changed
-    6. Write scrape_job_item
+Resume: `data/{supplier}-refresh-progress.json` tracks completed categories within a cycle.
+
+### Non-destructive updates (chat-safe)
+
+Scheduled scrapes **never delete or bulk-replace** product data. Each row is handled independently:
+
+| Scrape result | DB action |
+|---------------|-----------|
+| New URL | `INSERT` one row |
+| Hash changed | `UPDATE` that row only — patch includes **changed fields only** |
+| Unchanged | Touch `last_checked_at` / `last_seen_at` only |
+| Not seen this cycle | **No write** — row left as-is |
+
+Rules that protect active chat:
+
+- Scraper runs in a **separate worker process**, not inside the chat API.
+- Postgres row-level updates — reads (chat retrieval) continue without blocking.
+- Enriched fields (`description`, `brand`, `image_src`) are **not overwritten with null** when the listing scrape omits them.
+- `metadata` is **merged**, not replaced.
+- Products missing from a category crawl are **not** deactivated or deleted.
+- `price_history` only **appends** rows when price changes.
+
+Manual run:
+
+```bash
+npm run refresh
+npm run refresh -- --supplier adam-dental --force
+npm run dev:scheduler
 ```
 
 ### Priority (v1.1)
@@ -195,18 +220,20 @@ Separate process from API:
 
 ```
 backend/src/workers/
-  scrape-worker.ts
   refresh-worker.ts
-  live-check-worker.ts
+  refresh-scheduler.ts
+  enrich-product-details.ts
   embedding-worker.ts   # re-embed when text fields change
+  live-check-worker.ts  # (planned)
 ```
 
-Queue: BullMQ + Redis
+Scheduler: `refresh-scheduler.ts` (no Redis required for MVP). BullMQ optional for scale later.
 
-| Queue | Purpose |
-|-------|---------|
-| scrape-seed | Initial category ingest |
-| scrape-refresh | Scheduled updates |
+| Queue / process | Purpose |
+|-----------------|--------|
+| refresh-scheduler | Checks supplier intervals, spawns refresh |
+| scrape-seed | Initial category ingest (scripts) |
+| scrape-refresh | Scheduled updates (refresh-worker) |
 | live-check | User-triggered |
 | embeddings | Async embedding generation |
 

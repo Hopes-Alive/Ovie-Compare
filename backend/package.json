@@ -20,6 +20,10 @@
     "embed": "tsx src/workers/embedding-worker.ts",
     "embed:henry-schein": "tsx src/workers/embedding-worker.ts --supplier henry-schein",
     "embed:adam-dental": "tsx src/workers/embedding-worker.ts --supplier adam-dental",
+    "apply-migrations": "tsx src/scripts/apply-pending-migrations.ts",
+    "refresh": "tsx src/workers/refresh-worker.ts",
+    "dev:scheduler": "tsx watch src/workers/refresh-scheduler.ts",
+    "start:scheduler": "tsx src/workers/refresh-scheduler.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -33,6 +37,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "pg": "^8.22.0",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3"
   }

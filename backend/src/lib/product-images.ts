@@ -44,7 +44,6 @@ export function resolveProductImageUrl(
   return url;
 }
 
-/** Henry Schein serves images at /images/ProductImages/{size}/{SKU}.jpg — not /Original/. */
 export function henryScheinImageUrlsForCode(code: string): string[] {
   const normalized = code.trim().toUpperCase();
   if (!normalized) return [];
@@ -61,6 +60,19 @@ export function henryScheinImageUrlsForCode(code: string): string[] {
     urls.push(`${base}/${normalized}_${i}.jpg`);
   }
 
+  return urls;
+}
+
+/** Adam Dental product images at /Images/ProductImages/{size}/{SKU}.jpg */
+export function adamDentalImageUrlsForCode(code: string): string[] {
+  const normalized = code.trim().toUpperCase();
+  if (!normalized) return [];
+
+  const base = `${SUPPLIER_BASE["adam-dental"]}/Images/ProductImages`;
+  const urls: string[] = [];
+  for (const size of ["500", "Medium", "250", "Small"]) {
+    urls.push(`${base}/${size}/${normalized}.jpg`);
+  }
   return urls;
 }
 
@@ -92,6 +104,10 @@ export function buildProductImageUrls(
 
   if (supplierSlug === "henry-schein" && externalSku) {
     for (const url of henryScheinImageUrlsForCode(externalSku)) push(url);
+  }
+
+  if (supplierSlug === "adam-dental" && externalSku) {
+    for (const url of adamDentalImageUrlsForCode(externalSku)) push(url);
   }
 
   for (const raw of parseImageSrc(imageSrc)) {

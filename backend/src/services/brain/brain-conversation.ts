@@ -14,6 +14,12 @@ import { chatClient, CHAT_MODEL } from "./llm-client.js";
 import { COLUMN_SCHEMA } from "./column-schema.js";
 import type { ChatHistoryMessage, SearchFilters, ProductRow, ProductCardData, SseEvent } from "./types.js";
 import { computeFreshness, formatLastCheckedAgo } from "./freshness.js";
+import {
+  formatAddedAgo,
+  isNewProduct,
+  computePriceChangeStatus,
+  loadLatestPriceHistory,
+} from "./product-metadata.js";
 import { getSupplierDisplayName } from "../../lib/supplier-display-name.js";
 import { buildProductImageUrls } from "../../lib/product-images.js";
 
@@ -252,8 +258,18 @@ export async function* answerTurn(
   }
 
   // After text stream, emit the structured products payload
+  const priceHistoryMap = await loadLatestPriceHistory(rows.map((r) => r.id));
+
   const productCards: ProductCardData[] = rows.map((r) => {
     const imageUrls = buildProductImageUrls(r.image_src, r.supplier_slug, r.external_sku);
+    const history = priceHistoryMap.get(r.id) ?? null;
+    const priceChangeStatus = computePriceChangeStatus(
+      r.created_at,
+      r.last_changed_at,
+      r.last_checked_at,
+      history,
+    );
+
     return {
       id: r.id,
       supplier: getSupplierDisplayName(r.supplier_slug, r.supplier_name),
@@ -263,9 +279,15 @@ export async function* answerTurn(
       currency: r.currency ?? "AUD",
       stockStatus: (r.stock_status ?? "unknown") as ProductCardData["stockStatus"],
       deliveryText: r.delivery_text ?? "",
-      lastCheckedAt: r.last_checked_at ?? new Date().toISOString(),
+      lastCheckedAt: r.last_checked_at ?? "",
       lastCheckedAgo: formatLastCheckedAgo(r.last_checked_at),
       freshness: computeFreshness(r.last_checked_at),
+      createdAt: r.created_at ?? "",
+      addedAgo: formatAddedAgo(r.created_at),
+      isNew: isNewProduct(r.created_at),
+      priceChangeStatus,
+      priceChangedAgo: history ? formatLastCheckedAgo(history.changed_at) : undefined,
+      previousPrice: history?.old_price ?? undefined,
       imageUrl: imageUrls[0],
       imageUrls,
       url: r.supplier_product_url || undefined,

@@ -24,6 +24,12 @@ backend/
     workers/
       embedding-worker.ts     Embeds products in batches
       enrich-product-details.ts  Playwright product page enricher
+      refresh-worker.ts       Scheduled category + URL refresh
+      refresh-scheduler.ts    Daemon — runs refresh on supplier interval
+    services/
+      scrape/
+        upsert-products.ts    Shared hash upsert + price_history
+        scrape-job.ts         scrape_jobs helpers
     scrapers/
       henry-schein/       Parser, adapter, selectors
       adam-dental/        Parser, adapter, selectors
@@ -89,6 +95,19 @@ npm run embed              # Embed all products missing embeddings
 npm run enrich             # Enrich product details via Playwright
 npm run seed:henry-schein  # Seed Henry Schein products
 npm run seed:adam-dental   # Seed Adam Dental products
+npm run refresh            # Manual scheduled refresh (all due suppliers)
+npm run refresh -- --supplier henry-schein --force
+npm run dev:scheduler      # Daemon: auto-refresh per supplier interval
 ```
+
+### Scheduled refresh
+
+1. Run migration `003_supplier_refresh_schedule.sql` in Supabase.
+2. Discover categories: `npm run discover:henry-schein` / `discover:adam-dental`.
+3. Start scheduler: `npm run dev:scheduler` (or cron `npm run refresh` every 15 min).
+4. Configure per-supplier interval in Admin → Suppliers (15 min – 7 days).
+
+**Pass A:** re-crawl all categories in `data/*-categories.json` (new products + listing updates).  
+**Pass B:** re-check every DB product URL not touched in Pass A via `parseProductPage`.
 
 See [.cursor/docs/](../.cursor/docs/) for full design docs.

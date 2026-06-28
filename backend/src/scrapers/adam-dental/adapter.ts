@@ -1,7 +1,7 @@
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import type { ProductDetail, SupplierAdapter } from "../../types/scraper.js";
 import { buildContentHash } from "../base-adapter.js";
-import { parsePageProducts } from "./parser.js";
+import { parsePageProducts, cleanProductUrl } from "./parser.js";
 import { ADAM_DENTAL_BASE, SHOW_MORE_SELECTOR } from "./selectors.js";
 
 const PAGE_WAIT_MS = 4000;
@@ -23,6 +23,22 @@ export class AdamDentalAdapter implements SupplierAdapter {
 
   buildContentHash(detail: ProductDetail): string {
     return buildContentHash(detail);
+  }
+
+  async parseProductPage(page: Page, pageUrl: string): Promise<ProductDetail | null> {
+    await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: PAGE_TIMEOUT_MS });
+    await page.waitForTimeout(PAGE_WAIT_MS);
+    const products = await parsePageProducts(page);
+    if (products.length === 0) return null;
+    const match =
+      products.find((p) => p.url === pageUrl || pageUrl.includes(p.externalSku ?? "")) ??
+      products[0];
+    if (!match) return null;
+    // Product detail pages expose price in window.products but not in listing-card data attrs
+    if (!pageUrl.includes("ProductSearch=")) {
+      return { ...match, url: cleanProductUrl(pageUrl) };
+    }
+    return match;
   }
 
   /**
