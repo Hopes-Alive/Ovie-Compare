@@ -3,6 +3,7 @@
  */
 import {
   getRunningRefreshJobs,
+  reconcileOrphanedRunningJobs,
   requestCancelRunningRefreshJobs,
 } from "./scrape-job.js";
 import { appendScrapeLog } from "./scrape-log.js";
@@ -22,6 +23,8 @@ export function getRunManagerState(): RunState {
 }
 
 export async function getScrapeStatus() {
+  await reconcileOrphanedRunningJobs(state.running);
+
   const runningJobs = await getRunningRefreshJobs();
   const inProcess = state.running || runningJobs.length > 0;
 

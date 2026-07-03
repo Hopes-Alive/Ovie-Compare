@@ -15,16 +15,86 @@ type ExistingRow = {
   description: string | null;
   image_src: string | null;
   stock_status: string | null;
+  stock_quantity: number | null;
+  unit_of_measure: string | null;
+  delivery_text: string | null;
+  delivery_min_days: number | null;
+  delivery_max_days: number | null;
   metadata: Record<string, unknown> | null;
 };
+
+/**
+ * Chunk values for a PostgREST `.in()` filter so the resulting request URL
+ * never blows past the ~16KB HTTP header limit. Plain count-based batching
+ * (e.g. 100 at a time) is fine for fixed-length UUIDs but not for
+ * `supplier_product_url`, which can run 100-250+ chars each — a single
+ * category can easily carry a hundred-plus products, so we also cap by
+ * total character budget, not just item count.
+ */
+function chunkForInFilter(values: string[], maxCount = 150, maxChars = 6000): string[][] {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let currentChars = 0;
+
+  for (const value of values) {
+    const wouldOverflow =
+      current.length >= maxCount || (current.length > 0 && currentChars + value.length > maxChars);
+    if (wouldOverflow) {
+      chunks.push(current);
+      current = [];
+      currentChars = 0;
+    }
+    current.push(value);
+    currentChars += value.length;
+  }
+  if (current.length > 0) chunks.push(current);
+
+  return chunks;
+}
+
+async function fetchExistingRowsByColumn(
+  supplierId: string,
+  column: "supplier_product_url" | "external_id",
+  values: string[],
+  selectCols: string,
+): Promise<ExistingRow[]> {
+  if (values.length === 0) return [];
+
+  const rows: ExistingRow[] = [];
+  for (const batch of chunkForInFilter(values)) {
+    const { data, error } = await supabase
+      .from("supplier_products")
+      .select(selectCols)
+      .eq("supplier_id", supplierId)
+      .in(column, batch);
+
+    if (error) throw error;
+    rows.push(...((data ?? []) as ExistingRow[]));
+  }
+
+  return rows;
+}
+
+function stockQuantityFromProduct(product: ProductDetail): number | null {
+  const raw = product.raw as { available_qty?: number | null } | undefined;
+  if (raw?.available_qty != null && Number.isFinite(raw.available_qty)) {
+    return Math.trunc(raw.available_qty);
+  }
+  return null;
+}
 
 export type UpsertProductsOptions = {
   supplierId: string;
   products: ProductDetail[];
-  jobId: string;
   buildContentHash: (detail: ProductDetail) => string;
+  /** Scrape job id — used for scrape_job_items and price_history.scrape_job_id */
+  jobId?: string;
+  /** Live check job id — sets price_history.live_check_job_id; skips scrape_job_items */
+  liveCheckJobId?: string;
+  /** When set (live check), update this row by id instead of resolving by URL */
+  existingProductId?: string;
   /** Defaults to "scheduled" for refresh jobs; seeds may pass "manual" */
-  priceHistorySource?: "scheduled" | "live_check" | "manual";
+  priceHistorySource?: "scheduled" | "live_check" | "manual" | "ai_read";
 };
 
 export type UpsertProductsResult = ScrapeStats & {
@@ -101,19 +171,24 @@ function buildSurgicalUpdatePatch(
   const patch: Record<string, unknown> = {
     content_hash: contentHash,
     last_checked_at: now,
-    last_changed_at: now,
     last_seen_at: now,
   };
 
   if (product.name !== existing.name) patch.name = product.name;
 
-  if (pricesDiffer(existing.price, product.price)) {
-    patch.price = product.price ?? null;
+  if (product.price != null && product.price > 0 && pricesDiffer(existing.price, product.price)) {
+    patch.price = product.price;
   }
 
   const stock = product.stockStatus ?? "unknown";
   if (stock !== (existing.stock_status ?? "unknown")) {
-    patch.stock_status = stock;
+    const wouldDowngradeToUnknown =
+      stock === "unknown" &&
+      existing.stock_status != null &&
+      existing.stock_status !== "unknown";
+    if (!wouldDowngradeToUnknown) {
+      patch.stock_status = stock;
+    }
   }
 
   if ((product.packSize ?? null) !== (existing.pack_size ?? null)) {
@@ -144,6 +219,24 @@ function buildSurgicalUpdatePatch(
     patch.image_src = product.imageSrc;
   }
 
+  const scrapedQty = stockQuantityFromProduct(product);
+  if (scrapedQty != null && scrapedQty !== (existing.stock_quantity ?? null)) {
+    patch.stock_quantity = scrapedQty;
+  }
+
+  if (product.unitOfMeasure != null && product.unitOfMeasure !== (existing.unit_of_measure ?? null)) {
+    patch.unit_of_measure = product.unitOfMeasure;
+  }
+  if (product.deliveryText != null && product.deliveryText !== (existing.delivery_text ?? null)) {
+    patch.delivery_text = product.deliveryText;
+  }
+  if (product.deliveryMinDays != null && product.deliveryMinDays !== (existing.delivery_min_days ?? null)) {
+    patch.delivery_min_days = product.deliveryMinDays;
+  }
+  if (product.deliveryMaxDays != null && product.deliveryMaxDays !== (existing.delivery_max_days ?? null)) {
+    patch.delivery_max_days = product.deliveryMaxDays;
+  }
+
   const mergedMeta = mergeMetadata(existing.metadata, product);
   const existingMetaJson = JSON.stringify(existing.metadata ?? {});
   const mergedMetaJson = JSON.stringify(mergedMeta ?? {});
@@ -155,18 +248,59 @@ function buildSurgicalUpdatePatch(
     patch.raw_snapshot = product.raw;
   }
 
+  const hasDataChanges = TRACKED_DATA_FIELDS.some((field) => field in patch);
+  if (hasDataChanges || mergedMetaJson !== existingMetaJson) {
+    patch.last_changed_at = now;
+  }
+
   return patch;
+}
+
+/** True when scraped values differ from the DB row (includes fields outside content_hash). */
+function scrapedDataDiffers(
+  existing: ExistingRow,
+  product: ProductDetail,
+  contentHash: string,
+): boolean {
+  if (existing.content_hash !== contentHash) return true;
+
+  if (product.price != null && pricesDiffer(existing.price, product.price)) return true;
+  if ((product.stockStatus ?? "unknown") !== (existing.stock_status ?? "unknown")) return true;
+  if (product.name !== existing.name) return true;
+  if ((product.packSize ?? null) !== (existing.pack_size ?? null)) return true;
+  if (product.url !== existing.supplier_product_url) return true;
+  if (product.brand != null && product.brand !== (existing.brand ?? null)) return true;
+  if (product.category != null && product.category !== (existing.category ?? null)) return true;
+  if (product.subcategory != null && product.subcategory !== (existing.subcategory ?? null)) return true;
+  if (product.description != null && product.description !== (existing.description ?? null)) return true;
+  if (product.imageSrc != null && product.imageSrc !== (existing.image_src ?? null)) return true;
+
+  const scrapedQty = stockQuantityFromProduct(product);
+  if (scrapedQty != null && scrapedQty !== (existing.stock_quantity ?? null)) return true;
+  if (product.unitOfMeasure != null && product.unitOfMeasure !== (existing.unit_of_measure ?? null)) return true;
+  if (product.deliveryText != null && product.deliveryText !== (existing.delivery_text ?? null)) return true;
+  if (product.deliveryMinDays != null && product.deliveryMinDays !== (existing.delivery_min_days ?? null)) return true;
+  if (product.deliveryMaxDays != null && product.deliveryMaxDays !== (existing.delivery_max_days ?? null)) return true;
+
+  const mergedMeta = mergeMetadata(existing.metadata, product);
+  return JSON.stringify(mergedMeta ?? {}) !== JSON.stringify(existing.metadata ?? {});
 }
 
 const CHANGE_LABELS: Record<string, string> = {
   price: "Price",
   stock_status: "Stock",
+  stock_quantity: "Stock qty",
   name: "Name",
   brand: "Brand",
   pack_size: "Pack size",
   category: "Category",
   subcategory: "Subcategory",
+  description: "Description",
   image_src: "Image",
+  unit_of_measure: "Unit",
+  delivery_text: "Delivery",
+  delivery_min_days: "Delivery min days",
+  delivery_max_days: "Delivery max days",
   supplier_product_url: "URL",
 };
 
@@ -180,6 +314,24 @@ const INTERNAL_PATCH_KEYS = new Set([
   "external_id",
   "external_sku",
 ]);
+
+const TRACKED_DATA_FIELDS = [
+  "name",
+  "price",
+  "stock_status",
+  "stock_quantity",
+  "pack_size",
+  "brand",
+  "category",
+  "subcategory",
+  "description",
+  "image_src",
+  "unit_of_measure",
+  "delivery_text",
+  "delivery_min_days",
+  "delivery_max_days",
+  "supplier_product_url",
+] as const;
 
 function formatChangeValue(field: string, value: unknown): string {
   if (value == null || value === "") return "—";
@@ -216,6 +368,18 @@ function existingFieldValue(existing: ExistingRow, field: string): unknown {
       return existing.subcategory;
     case "image_src":
       return existing.image_src;
+    case "stock_quantity":
+      return existing.stock_quantity;
+    case "unit_of_measure":
+      return existing.unit_of_measure;
+    case "delivery_text":
+      return existing.delivery_text;
+    case "delivery_min_days":
+      return existing.delivery_min_days;
+    case "delivery_max_days":
+      return existing.delivery_max_days;
+    case "description":
+      return existing.description;
     case "supplier_product_url":
       return existing.supplier_product_url;
     default:
@@ -250,9 +414,16 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
     supplierId,
     products,
     jobId,
+    liveCheckJobId,
+    existingProductId,
     buildContentHash,
     priceHistorySource = "scheduled",
   } = options;
+
+  const trackScrapeJobItems = Boolean(jobId) && !liveCheckJobId;
+  const isUserTriggeredRefresh =
+    Boolean(liveCheckJobId) &&
+    (priceHistorySource === "live_check" || priceHistorySource === "ai_read");
 
   const stats: UpsertProductsResult = {
     found: products.length,
@@ -277,27 +448,20 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
   ];
 
   const selectCols =
-    "id, external_id, supplier_product_url, content_hash, price, name, brand, category, subcategory, pack_size, description, image_src, stock_status, metadata";
+    "id, external_id, supplier_product_url, content_hash, price, name, brand, category, subcategory, pack_size, description, image_src, stock_status, stock_quantity, unit_of_measure, delivery_text, delivery_min_days, delivery_max_days, metadata";
 
-  const { data: existingByUrlRows, error: fetchByUrlErr } = await supabase
-    .from("supplier_products")
-    .select(selectCols)
-    .eq("supplier_id", supplierId)
-    .in("supplier_product_url", urls);
-
-  if (fetchByUrlErr) throw fetchByUrlErr;
-
-  let existingByExtIdRows: ExistingRow[] = [];
-  if (externalIds.length > 0) {
-    const { data, error: fetchByExtErr } = await supabase
-      .from("supplier_products")
-      .select(selectCols)
-      .eq("supplier_id", supplierId)
-      .in("external_id", externalIds);
-
-    if (fetchByExtErr) throw fetchByExtErr;
-    existingByExtIdRows = (data ?? []) as ExistingRow[];
-  }
+  const existingByUrlRows = await fetchExistingRowsByColumn(
+    supplierId,
+    "supplier_product_url",
+    urls,
+    selectCols,
+  );
+  const existingByExtIdRows = await fetchExistingRowsByColumn(
+    supplierId,
+    "external_id",
+    externalIds,
+    selectCols,
+  );
 
   const existingByUrl = new Map<string, ExistingRow>();
   const existingByExternalId = new Map<string, ExistingRow>();
@@ -309,7 +473,21 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
     }
   }
 
+  let pinnedExisting: ExistingRow | undefined;
+  if (existingProductId) {
+    const { data: pinnedRow, error: pinnedErr } = await supabase
+      .from("supplier_products")
+      .select(selectCols)
+      .eq("id", existingProductId)
+      .eq("supplier_id", supplierId)
+      .maybeSingle();
+
+    if (pinnedErr) throw pinnedErr;
+    pinnedExisting = (pinnedRow as ExistingRow | null) ?? undefined;
+  }
+
   function resolveExisting(product: ProductDetail): ExistingRow | undefined {
+    if (pinnedExisting) return pinnedExisting;
     const byUrl = existingByUrl.get(product.url);
     if (byUrl) return byUrl;
     if (product.externalId) return existingByExternalId.get(product.externalId);
@@ -374,25 +552,36 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
           ? [{ field: "price", label: "Price", from: "—", to: formatChangeValue("price", product.price) }]
           : [],
       });
-      jobItems.push({
-        scrape_job_id: jobId,
-        url: product.url,
-        status: "success",
-        action: "created",
-      });
-    } else if (existing.content_hash !== contentHash) {
+      if (trackScrapeJobItems && jobId) {
+        jobItems.push({
+          scrape_job_id: jobId,
+          url: product.url,
+          status: "success",
+          action: "created",
+        });
+      }
+    } else if (
+      isUserTriggeredRefresh
+        ? scrapedDataDiffers(existing, product, contentHash)
+        : existing.content_hash !== contentHash
+    ) {
       if (textFieldsChanged(existing, product)) {
         stats.needsEmbedding++;
       }
-      if (pricesDiffer(existing.price, product.price)) {
-        priceHistoryRows.push({
+      if (product.price != null && pricesDiffer(existing.price, product.price)) {
+        const historyRow: Record<string, unknown> = {
           supplier_product_id: existing.id,
           old_price: existing.price,
-          new_price: product.price ?? null,
+          new_price: product.price,
           changed_at: now,
           source: priceHistorySource,
-          scrape_job_id: jobId,
-        });
+        };
+        if (liveCheckJobId) {
+          historyRow.live_check_job_id = liveCheckJobId;
+        } else if (jobId) {
+          historyRow.scrape_job_id = jobId;
+        }
+        priceHistoryRows.push(historyRow);
       }
       toUpdate.push({
         id: existing.id,
@@ -410,12 +599,14 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
         newPrice: product.price ?? null,
         changes,
       });
-      jobItems.push({
-        scrape_job_id: jobId,
-        url: product.url,
-        status: "success",
-        action: "updated",
-      });
+      if (trackScrapeJobItems && jobId) {
+        jobItems.push({
+          scrape_job_id: jobId,
+          url: product.url,
+          status: "success",
+          action: "updated",
+        });
+      }
     } else {
       if (!existing.image_src && product.imageSrc) {
         toBackfillImage.push({ id: existing.id, url: product.url, imageSrc: product.imageSrc });
@@ -429,12 +620,14 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
         action: "unchanged",
         newPrice: existing.price,
       });
-      jobItems.push({
-        scrape_job_id: jobId,
-        url: product.url,
-        status: "success",
-        action: "unchanged",
-      });
+      if (trackScrapeJobItems && jobId) {
+        jobItems.push({
+          scrape_job_id: jobId,
+          url: product.url,
+          status: "success",
+          action: "unchanged",
+        });
+      }
     }
   }
 
@@ -503,7 +696,7 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
     }
   }
 
-  if (jobItems.length > 0) {
+  if (trackScrapeJobItems && jobItems.length > 0) {
     await supabase.from("scrape_job_items").insert(jobItems);
   }
 

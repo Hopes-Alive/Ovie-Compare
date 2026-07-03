@@ -1,11 +1,10 @@
 /**
  * Retrieval service — executes the database search based on LLM-extracted filters.
  *
- * Strategy:
- * 1. Run filter query + embedText(rewritten_query) in parallel via Promise.all.
- * 2a. If matches > 0: sort the filtered pool by JS cosine similarity → top 5.
- * 2b. If matches = 0: fallback to FTS (full-text search) on search_vector → top 5.
- * 3. Return { rows, total, fallback }.
+ * Strategy (hybrid):
+ * 1. Run structured filter query + FTS on rewritten_query + embed query in parallel.
+ * 2. Merge pools, then reciprocal-rank-fusion (FTS rank + vector rank).
+ * 3. Cross-supplier queries run per supplier in parallel, then balance top results.
  *
  * No Postgres stored functions required — works with the Supabase JS client only.
  */
@@ -13,8 +12,9 @@ import { supabase } from "../../lib/supabase.js";
 import { embedText } from "./llm-client.js";
 import type { SearchFilters, SearchResult, ProductRow } from "./types.js";
 
-const FILTER_POOL_LIMIT = 80; // max rows to fetch before cosine re-ranking
+const FILTER_POOL_LIMIT = 80; // max rows to fetch before hybrid re-ranking
 const RESULT_LIMIT = 5;
+const RRF_K = 60;
 
 // ---------------------------------------------------------------------------
 // Cosine similarity (in-process — fast for small pools)
@@ -127,6 +127,15 @@ function toProductRow(raw: Record<string, unknown>): ProductRow & { _embedding: 
 // Primary: filter query
 // ---------------------------------------------------------------------------
 
+async function resolveSupplierId(slug: string): Promise<string | null> {
+  const { data: sup } = await supabase
+    .from("suppliers")
+    .select("id")
+    .eq("slug", slug)
+    .single();
+  return (sup as { id: string } | null)?.id ?? null;
+}
+
 async function runFilterQuery(filters: SearchFilters): Promise<{
   rows: Array<ProductRow & { _embedding: number[] | null }>;
   total: number;
@@ -134,12 +143,7 @@ async function runFilterQuery(filters: SearchFilters): Promise<{
   // Resolve supplier_slug → supplier_id if needed
   let supplierIdFilter: string | null = null;
   if (filters.supplier_slug) {
-    const { data: sup } = await supabase
-      .from("suppliers")
-      .select("id")
-      .eq("slug", filters.supplier_slug)
-      .single();
-    supplierIdFilter = (sup as { id: string } | null)?.id ?? null;
+    supplierIdFilter = await resolveSupplierId(filters.supplier_slug);
   }
 
   // Count query (fast — no embedding column)
@@ -200,12 +204,13 @@ function applyColumnFilters(
 
 // Words that describe intent/sorting but are not product keywords
 const NON_PRODUCT_WORDS = new Set([
-  "cheapest", "cheapest", "cheap", "affordable", "budget", "inexpensive",
+  "cheapest", "cheap", "affordable", "budget", "inexpensive",
   "expensive", "premium", "best", "most", "any", "some", "all",
   "lowest", "highest", "price", "cost", "value", "deal",
   "find", "show", "get", "give", "want", "need", "looking", "search",
   "please", "can", "could", "would", "should", "will", "do", "for", "me",
   "the", "a", "an", "and", "or", "in", "on", "at", "of", "to", "from", "with",
+  "compare", "comparison", "supplier", "suppliers", "dental", "australia", "aud",
 ]);
 
 function cleanQueryForFts(query: string): string {
@@ -216,22 +221,163 @@ function cleanQueryForFts(query: string): string {
   return words.length > 0 ? words.join(" ") : query;
 }
 
+/** When the planner omits name, derive the strongest keyword for ILIKE narrowing. */
+function enrichFiltersWithKeywords(filters: SearchFilters): SearchFilters {
+  if (filters.name) return filters;
+
+  const keywords = cleanQueryForFts(filters.rewritten_query)
+    .split(/\s+/)
+    .filter((w) => w.length > 2);
+
+  if (keywords.length === 0) return filters;
+
+  const primary = keywords.reduce((best, word) => (word.length > best.length ? word : best));
+  return { ...filters, name: primary };
+}
+
+function reciprocalRankFusion(rankedLists: string[][]): Map<string, number> {
+  const scores = new Map<string, number>();
+  for (const list of rankedLists) {
+    list.forEach((id, rank) => {
+      scores.set(id, (scores.get(id) ?? 0) + 1 / (RRF_K + rank + 1));
+    });
+  }
+  return scores;
+}
+
+type EmbeddedRow = ProductRow & { _embedding: number[] | null };
+
+function scoreAndStripRow(
+  row: EmbeddedRow,
+  queryVector: number[],
+  rrfScores: Map<string, number>,
+): ProductRow {
+  const sim = row._embedding ? cosineSimilarity(queryVector, row._embedding) : 0;
+  const { _embedding, ...rest } = row;
+  return { ...rest, similarity: sim + (rrfScores.get(row.id) ?? 0) * 0.01 };
+}
+
+function hybridRerank(
+  pool: EmbeddedRow[],
+  queryVector: number[],
+  ftsRankIds: string[],
+  sortBy: SearchFilters["sort_by"],
+): ProductRow[] {
+  if (pool.length === 0) return [];
+
+  const vectorRankIds = [...pool]
+    .sort((a, b) => {
+      const simA = a._embedding ? cosineSimilarity(queryVector, a._embedding) : 0;
+      const simB = b._embedding ? cosineSimilarity(queryVector, b._embedding) : 0;
+      return simB - simA;
+    })
+    .map((r) => r.id);
+
+  const rrfScores = reciprocalRankFusion([ftsRankIds, vectorRankIds]);
+  const scored = pool.map((row) => scoreAndStripRow(row, queryVector, rrfScores));
+
+  if (sortBy === "price_asc") {
+    return scored.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
+  }
+  if (sortBy === "price_desc") {
+    return scored.sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
+  }
+
+  return scored.sort((a, b) => {
+    const rrfA = rrfScores.get(a.id) ?? 0;
+    const rrfB = rrfScores.get(b.id) ?? 0;
+    if (rrfB !== rrfA) return rrfB - rrfA;
+    return (b.similarity ?? 0) - (a.similarity ?? 0);
+  });
+}
+
 // ---------------------------------------------------------------------------
-// Fallback: full-text search (no embedding needed)
+// Full-text search (always used alongside filters — not only as fallback)
 // ---------------------------------------------------------------------------
 
-async function runFtsSearch(query: string): Promise<Array<ProductRow & { _embedding: number[] | null }>> {
-  const cleaned = cleanQueryForFts(query);
+async function runFtsSearchFiltered(
+  filters: SearchFilters,
+  supplierIdFilter: string | null,
+): Promise<EmbeddedRow[]> {
+  const cleaned = cleanQueryForFts(filters.rewritten_query);
+  if (!cleaned.trim()) return [];
 
-  const { data, error } = await (supabase as AnyQuery)
+  let query: AnyQuery = (supabase as AnyQuery)
     .from("supplier_products")
     .select(PRODUCT_SELECT)
     .eq("is_active", true)
     .textSearch("search_vector", cleaned, { type: "websearch" })
     .limit(FILTER_POOL_LIMIT);
 
-  if (error) throw new Error(`FTS fallback failed: ${(error as { message: string }).message}`);
+  query = applyColumnFilters(query, filters, supplierIdFilter);
+
+  const { data, error } = await query;
+  if (error) throw new Error(`FTS search failed: ${(error as { message: string }).message}`);
   return ((data as unknown[]) ?? []).map((r) => toProductRow(r as Record<string, unknown>));
+}
+
+async function buildHybridPool(filters: SearchFilters): Promise<{
+  rows: ProductRow[];
+  total: number;
+  ftsPrimary: boolean;
+}> {
+  const attempts: SearchFilters[] = [enrichFiltersWithKeywords(filters)];
+
+  if (filters.subcategory) {
+    attempts.push(enrichFiltersWithKeywords({ ...filters, subcategory: undefined }));
+  }
+  if (filters.category) {
+    attempts.push(
+      enrichFiltersWithKeywords({
+        ...filters,
+        category: undefined,
+        subcategory: undefined,
+      }),
+    );
+  }
+
+  let ftsPrimary = false;
+
+  for (const effectiveFilters of attempts) {
+    let supplierIdFilter: string | null = null;
+    if (effectiveFilters.supplier_slug) {
+      supplierIdFilter = await resolveSupplierId(effectiveFilters.supplier_slug);
+    }
+
+    const [filterResult, ftsRows, queryVector] = await Promise.all([
+      runFilterQuery(effectiveFilters),
+      runFtsSearchFiltered(effectiveFilters, supplierIdFilter),
+      embedText(filters.rewritten_query),
+    ]);
+
+    const poolMap = new Map<string, EmbeddedRow>();
+    for (const row of filterResult.rows) poolMap.set(row.id, row);
+    for (const row of ftsRows) {
+      if (!poolMap.has(row.id)) poolMap.set(row.id, row);
+    }
+
+    const pool = [...poolMap.values()];
+    if (pool.length === 0) {
+      ftsPrimary = filterResult.total === 0;
+      continue;
+    }
+
+    const ranked = hybridRerank(
+      pool,
+      queryVector,
+      ftsRows.map((r) => r.id),
+      effectiveFilters.sort_by ?? filters.sort_by,
+    );
+
+    const total = Math.max(filterResult.total, ftsRows.length);
+    return {
+      rows: ranked,
+      total,
+      ftsPrimary: filterResult.total === 0 && ftsRows.length > 0,
+    };
+  }
+
+  return { rows: [], total: 0, ftsPrimary };
 }
 
 // ---------------------------------------------------------------------------
@@ -330,21 +476,32 @@ async function attachCanonicalAlternatives(rows: ProductRow[]): Promise<ProductR
 }
 
 // ---------------------------------------------------------------------------
-// Cosine re-rank and strip embedding before returning
+// Cosine re-rank helpers
 // ---------------------------------------------------------------------------
 
-function rerank(
-  rows: Array<ProductRow & { _embedding: number[] | null }>,
-  queryVector: number[]
-): ProductRow[] {
-  return rows
-    .map((r) => {
-      const sim = r._embedding ? cosineSimilarity(queryVector, r._embedding) : 0;
-      const { _embedding, ...rest } = r;
-      return { ...rest, similarity: sim };
-    })
-    .sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0))
-    .slice(0, RESULT_LIMIT);
+function rerankBalanced(rows: ProductRow[]): ProductRow[] {
+  const scored = [...rows].sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0));
+
+  const perSupplierCount: Record<string, number> = {};
+  const selected: ProductRow[] = [];
+
+  for (const row of scored) {
+    if (selected.length >= RESULT_LIMIT) break;
+    const supplierCount = perSupplierCount[row.supplier_slug] ?? 0;
+    if (supplierCount >= RESULTS_PER_SUPPLIER) continue;
+    perSupplierCount[row.supplier_slug] = supplierCount + 1;
+    selected.push(row);
+  }
+
+  if (selected.length < RESULT_LIMIT) {
+    const selectedIds = new Set(selected.map((r) => r.id));
+    for (const row of scored) {
+      if (selected.length >= RESULT_LIMIT) break;
+      if (!selectedIds.has(row.id)) selected.push(row);
+    }
+  }
+
+  return selected;
 }
 
 // ---------------------------------------------------------------------------
@@ -376,13 +533,14 @@ function mapCategoryForSupplier(category: string | undefined, slug: string): str
 }
 
 /**
- * When no supplier_slug filter is set, run one sub-query per supplier in
+ * When no supplier_slug filter is set, run one hybrid search per supplier in
  * parallel so the merged result pool always includes candidates from every
  * supplier that carries matching products.
  */
-async function runPerSupplierQueries(filters: SearchFilters): Promise<{
-  rows: Array<ProductRow & { _embedding: number[] | null }>;
+async function runPerSupplierHybridSearch(filters: SearchFilters): Promise<{
+  rows: ProductRow[];
   totalBySupplier: Record<string, number>;
+  ftsPrimary: boolean;
 }> {
   const results = await Promise.all(
     ALL_SUPPLIER_SLUGS.map(async (slug) => {
@@ -391,21 +549,22 @@ async function runPerSupplierQueries(filters: SearchFilters): Promise<{
         supplier_slug: slug,
         category: mapCategoryForSupplier(filters.category, slug),
       };
-      const { rows, total } = await runFilterQuery(supplierFilters);
-      return { slug, rows, total };
-    })
+      const { rows, total, ftsPrimary } = await buildHybridPool(supplierFilters);
+      return { slug, rows, total, ftsPrimary };
+    }),
   );
 
-  const allRows: Array<ProductRow & { _embedding: number[] | null }> = [];
+  const allRows: ProductRow[] = [];
   const totalBySupplier: Record<string, number> = {};
+  let ftsPrimary = false;
 
-  for (const { slug, rows, total } of results) {
+  for (const { slug, rows, total, ftsPrimary: usedFts } of results) {
     totalBySupplier[slug] = total;
-    // Take up to RESULTS_PER_SUPPLIER from each supplier for the merge pool
-    allRows.push(...rows.slice(0, Math.min(rows.length, RESULTS_PER_SUPPLIER * 10)));
+    if (usedFts) ftsPrimary = true;
+    allRows.push(...rows.slice(0, Math.min(rows.length, RESULTS_PER_SUPPLIER * 4)));
   }
 
-  return { rows: allRows, totalBySupplier };
+  return { rows: allRows, totalBySupplier, ftsPrimary };
 }
 
 // ---------------------------------------------------------------------------
@@ -414,84 +573,33 @@ async function runPerSupplierQueries(filters: SearchFilters): Promise<{
 
 export async function retrieveProducts(filters: SearchFilters): Promise<SearchResult> {
   if (filters.supplier_slug) {
-    // User explicitly asked for a specific supplier — single query path
-    const [{ rows, total }, queryVector] = await Promise.all([
-      runFilterQuery(filters),
-      embedText(filters.rewritten_query),
-    ]);
-
-    if (rows.length === 0) {
-      const ftsRows = await runFtsSearch(filters.rewritten_query);
-      const ranked = rerank(ftsRows, queryVector);
-      const withAlts = await attachCanonicalAlternatives(ranked);
-      return { rows: withAlts, total: ranked.length, fallback: true };
-    }
-
-    const ranked = rerank(rows, queryVector);
-    const withAlts = await attachCanonicalAlternatives(ranked);
-    return { rows: withAlts, total, fallback: false };
+    const { rows, total, ftsPrimary } = await buildHybridPool(filters);
+    const top = rows.slice(0, RESULT_LIMIT);
+    const withAlts = await attachCanonicalAlternatives(top);
+    return { rows: withAlts, total, fallback: ftsPrimary };
   }
 
-  // No supplier filter — run per-supplier parallel queries to guarantee
-  // representation from every supplier that carries the product
-  const [{ rows: allRows, totalBySupplier }, queryVector] = await Promise.all([
-    runPerSupplierQueries(filters),
-    embedText(filters.rewritten_query),
-  ]);
-
+  const { rows: allRows, totalBySupplier, ftsPrimary } = await runPerSupplierHybridSearch(filters);
   const grandTotal = Object.values(totalBySupplier).reduce((a, b) => a + b, 0);
 
   if (allRows.length === 0) {
-    // No results from any supplier — FTS fallback
-    const ftsRows = await runFtsSearch(filters.rewritten_query);
-    const ranked = rerank(ftsRows, queryVector);
+    const globalFilters = enrichFiltersWithKeywords(filters);
+    const ftsRows = await runFtsSearchFiltered(globalFilters, null);
+    if (ftsRows.length === 0) {
+      return { rows: [], total: 0, fallback: true };
+    }
+    const queryVector = await embedText(filters.rewritten_query);
+    const ranked = hybridRerank(
+      ftsRows,
+      queryVector,
+      ftsRows.map((r) => r.id),
+      filters.sort_by,
+    ).slice(0, RESULT_LIMIT);
     const withAlts = await attachCanonicalAlternatives(ranked);
     return { rows: withAlts, total: ranked.length, fallback: true };
   }
 
-  // Cosine re-rank the combined cross-supplier pool, ensure supplier balance
-  const ranked = rerankBalanced(allRows, queryVector);
+  const ranked = rerankBalanced(allRows);
   const withAlts = await attachCanonicalAlternatives(ranked);
-  return { rows: withAlts, total: grandTotal, fallback: false };
-}
-
-/**
- * Re-rank a cross-supplier pool by cosine similarity, then ensure the final
- * top-5 has at most RESULTS_PER_SUPPLIER results from any single supplier
- * (so both suppliers appear when both have matches).
- */
-function rerankBalanced(
-  rows: Array<ProductRow & { _embedding: number[] | null }>,
-  queryVector: number[]
-): ProductRow[] {
-  // Score all rows
-  const scored = rows.map((r) => {
-    const sim = r._embedding ? cosineSimilarity(queryVector, r._embedding) : 0;
-    const { _embedding, ...rest } = r;
-    return { ...rest, similarity: sim };
-  }).sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0));
-
-  // Pick top results while enforcing per-supplier cap
-  const perSupplierCount: Record<string, number> = {};
-  const selected: ProductRow[] = [];
-
-  for (const row of scored) {
-    if (selected.length >= RESULT_LIMIT) break;
-    const supplierCount = perSupplierCount[row.supplier_slug] ?? 0;
-    if (supplierCount >= RESULTS_PER_SUPPLIER) continue;
-    perSupplierCount[row.supplier_slug] = supplierCount + 1;
-    selected.push(row);
-  }
-
-  // If we didn't hit RESULT_LIMIT (e.g. only one supplier had results),
-  // fill remaining slots without the cap
-  if (selected.length < RESULT_LIMIT) {
-    const selectedIds = new Set(selected.map((r) => r.id));
-    for (const row of scored) {
-      if (selected.length >= RESULT_LIMIT) break;
-      if (!selectedIds.has(row.id)) selected.push(row);
-    }
-  }
-
-  return selected;
+  return { rows: withAlts, total: grandTotal, fallback: ftsPrimary };
 }

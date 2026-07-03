@@ -1,5 +1,14 @@
 import { supabase } from "../../lib/supabase.js";
 import type { ScrapeStats } from "../../types/scraper.js";
+import { appendScrapeLog } from "./scrape-log.js";
+
+const EMPTY_STATS: ScrapeStats = {
+  found: 0,
+  created: 0,
+  updated: 0,
+  unchanged: 0,
+  failed: 0,
+};
 
 export type ScrapeJobType = "full_seed" | "category_seed" | "refresh" | "search_seed";
 export type ScrapeJobTriggeredBy = "scheduler" | "admin" | "system" | "script";
@@ -71,16 +80,24 @@ export async function failScrapeJob(jobId: string, errorMessage: string): Promis
     .eq("id", jobId);
 }
 
-export async function hasRunningRefreshJob(supplierId: string): Promise<boolean> {
+/**
+ * True while ANY scrape job — admin/scheduled `refresh` or a one-off seed
+ * script (`category_seed`/`full_seed`/`search_seed`, e.g. `npm run seed:*`)
+ * — is running for this supplier. Seed scripts don't honour `cancel_requested`
+ * and use their own Playwright browser, so starting an admin/scheduled
+ * refresh at the same time doubles site traffic and interleaves writes to
+ * `supplier_products` — this guard keeps admin refresh from racing them.
+ */
+export async function hasActiveScrapeJob(supplierId: string): Promise<boolean> {
   const { data, error } = await supabase
     .from("scrape_jobs")
     .select("id")
     .eq("supplier_id", supplierId)
-    .eq("job_type", "refresh")
+    .in("job_type", ["refresh", "category_seed", "full_seed", "search_seed"])
     .eq("status", "running")
     .limit(1);
 
-  if (error) throw new Error(`Failed to check running jobs: ${error.message}`);
+  if (error) throw new Error(`Failed to check active scrape jobs: ${error.message}`);
   return (data?.length ?? 0) > 0;
 }
 
@@ -137,6 +154,48 @@ export async function requestCancelRunningRefreshJobs(): Promise<number> {
 
   if (error) throw new Error(`Failed to request cancel: ${error.message}`);
   return data?.length ?? 0;
+}
+
+/** Finish jobs stuck in `running` after a crash or when no worker picks up cancel. */
+export async function reconcileOrphanedRunningJobs(inProcessRunning: boolean): Promise<void> {
+  const jobs = await getRunningRefreshJobs();
+  if (jobs.length === 0) return;
+
+  const now = Date.now();
+  const staleRunningMs = 12 * 60 * 60 * 1000;
+  const staleCancelMs = 90_000;
+
+  for (const job of jobs) {
+    const startedAt = job.started_at ? new Date(job.started_at).getTime() : now;
+    if (now - startedAt > staleRunningMs) {
+      await finishScrapeJob(job.id, EMPTY_STATS, "Timed out (stale running job)", "partial");
+      await appendScrapeLog(job.id, "warn", "Scrape marked stopped — job exceeded max runtime", {
+        cancelled: true,
+      });
+      continue;
+    }
+
+    if (!job.cancel_requested || inProcessRunning) continue;
+
+    const { data: lastLog } = await supabase
+      .from("scrape_job_logs")
+      .select("created_at")
+      .eq("scrape_job_id", job.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const lastActivity = lastLog?.created_at
+      ? new Date(lastLog.created_at as string).getTime()
+      : startedAt;
+
+    if (now - lastActivity < staleCancelMs) continue;
+
+    await finishScrapeJob(job.id, EMPTY_STATS, "Cancelled — no active worker", "partial");
+    await appendScrapeLog(job.id, "warn", "Scrape stopped — no worker responded to cancel", {
+      cancelled: true,
+    });
+  }
 }
 
 export async function getSupplierIdBySlug(slug: string): Promise<string> {

@@ -87,7 +87,9 @@ async function main() {
     process.stdout.write(`[${i + 1}/${rows.length}] ${row.external_sku} … `);
 
     try {
-      const product = await adapter.parseProductPage(page, url);
+      const product = await adapter.parseProductPage(page, url, {
+        externalSku: row.external_sku as string | null,
+      });
       if (!product) {
         parseFailed++;
         console.log("parse failed");

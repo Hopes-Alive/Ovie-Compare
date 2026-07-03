@@ -9,8 +9,8 @@ export function LandingFooter() {
           for professional judgment.
         </p>
         <p className="mt-3 text-xs text-muted-foreground">
-          Data freshness varies by supplier. Use &ldquo;Check live price&rdquo;
-          in chat for the latest price before purchasing.
+          Data freshness varies by supplier. Use &ldquo;Check current status&rdquo;
+          in chat for the latest price and stock before purchasing.
         </p>
       </div>
     </footer>

@@ -6,8 +6,6 @@
   "scripts": {
     "dev:api": "tsx watch src/api/server.ts",
     "start:api": "tsx src/api/server.ts",
-    "test:scrape": "tsx src/scripts/test-scrape.ts",
-    "test:scrape:adam-dental": "tsx src/scripts/test-scrape.ts --supplier adam-dental",
     "discover:henry-schein": "tsx src/scripts/discover-categories.ts",
     "seed:henry-schein": "tsx src/scripts/seed-henry-schein.ts",
     "discover:adam-dental": "tsx src/scripts/discover-adam-dental-categories.ts",

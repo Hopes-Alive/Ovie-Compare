@@ -16,7 +16,7 @@ export function normalizeAssistantMarkdown(content: string): string {
 
   text = text.replace(
     /Want me to check a live price\??/gi,
-    "You can check live prices anytime by clicking Check live price on the product cards below."
+    "You can check current price and stock anytime by clicking Check current status on the product cards below."
   );
 
   return text;
@@ -43,7 +43,7 @@ export function splitFollowUp(body: string): { main: string; followUp: string | 
     !last.startsWith("*") &&
     !/^\d+\./.test(last) &&
     (/^(Want|Would|Need|Can I|Should|Let me know|I can|Happy to|You can)/i.test(last) ||
-      (/check live price/i.test(last) && blocks.length > 1) ||
+      (/check current status|check live price/i.test(last) && blocks.length > 1) ||
       (last.endsWith("?") && blocks.length > 1));
 
   if (isFollowUp) {

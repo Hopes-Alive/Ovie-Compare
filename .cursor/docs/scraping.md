@@ -139,7 +139,7 @@ Admin-configurable interval per supplier (`suppliers.refresh_interval_minutes`, 
 
 ```
 refresh-scheduler (every 60s)
-  → if supplier due AND no running refresh job:
+  → if supplier due AND no active scrape job (refresh OR seed):
        refresh-worker
          Pass A: re-crawl all discovered categories (data/*-categories.json)
            → upsertProducts (created / updated / unchanged + price_history)
@@ -149,6 +149,16 @@ refresh-scheduler (every 60s)
 ```
 
 Resume: `data/{supplier}-refresh-progress.json` tracks completed categories within a cycle.
+
+The admin **manual "Run scrape now"** button and the **scheduler** share this same
+engine (`runSuppliersRefreshParallel` in `refresh-runner.ts`) — the only
+difference is `triggered_by` (`admin` vs `scheduler`). Both check
+`hasActiveScrapeJob(supplierId)` (`scrape-job.ts`) before starting a supplier,
+which is true while **either** a `refresh` job **or** a one-off seed script
+(`category_seed`/`full_seed`/`search_seed`, e.g. `npm run seed:*`) is running
+for that supplier — seed scripts use their own Playwright browser and don't
+honour `cancel_requested`, so this guard stops admin refresh from racing them
+and double-hitting the supplier site / interleaving writes.
 
 ### Non-destructive updates (chat-safe)
 
@@ -203,6 +213,30 @@ Stricter than bulk scrape:
 ```
 
 **Never** accept arbitrary URLs from LLM or user — only DB-stored product URLs.
+
+### `parseProductPage` DOM enrichment (single-URL parse only)
+
+`parseProductPage` (used by live check, the AI-read fallback, and repair
+scripts — **not** the bulk category listing scrape) also calls
+`extractPdpDomFields()` (`backend/src/lib/extract-pdp-dom-fields.ts`) once,
+right after the first canonical-URL navigation, and merges the result via
+`mergeDomFields()` (`backend/src/scrapers/parse-product-helpers.ts`). This
+fills gaps the `window.products` / `data-product-data` parse can't see:
+
+- `description` / `brand` — from `.widget-product-field-ProductDescription` /
+  `.widget-product-field-CUS_BrandText`.
+- A higher-confidence `imageSrc` — rejects generic placeholder/logo images.
+- A real `stockStatus` for **login-required / APHRA-restricted products**,
+  where `AvailableQty` is never exposed and the structured parse alone can
+  only return `unknown` forever. The DOM shows a `.cart-product-availability`
+  badge instead.
+  - Some PDPs render a **variant options table** (size/shade/pack-size rows,
+    each with its own `.cart-product-availability`). The badge is only
+    trusted when it's scoped to a row whose product-code cell matches our
+    `externalSku`, or when exactly one badge exists on the page. Otherwise
+    the result stays `unknown` — **never guess** a sibling variant's stock.
+- Merge is additive only: it never overwrites a value the structured parser
+  already found.
 
 ---
 

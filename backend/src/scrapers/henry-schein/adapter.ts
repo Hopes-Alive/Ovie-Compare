@@ -1,6 +1,14 @@
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
-import type { ProductDetail, SupplierAdapter } from "../../types/scraper.js";
+import type { ParseProductPageOptions, ProductDetail, SupplierAdapter } from "../../types/scraper.js";
 import { buildContentHash } from "../base-adapter.js";
+import { extractPdpDomFields } from "../../lib/extract-pdp-dom-fields.js";
+import { henryScheinImageUrlsForCode } from "../../lib/product-images.js";
+import {
+  extractProductCodeFromUrl,
+  hasValidPrice,
+  mergeDomFields,
+  pickProductMatch,
+} from "../parse-product-helpers.js";
 import { parsePageProducts } from "./parser.js";
 import { HENRY_SCHEIN_BASE } from "./selectors.js";
 
@@ -22,31 +30,69 @@ export class HenryScheinAdapter implements SupplierAdapter {
     return buildContentHash(detail);
   }
 
-  async parseProductPage(page: Page, pageUrl: string): Promise<ProductDetail | null> {
-    await page.goto(pageUrl, { waitUntil: "domcontentloaded", timeout: PAGE_TIMEOUT_MS });
+  async parseProductPage(
+    page: Page,
+    pageUrl: string,
+    options?: ParseProductPageOptions,
+  ): Promise<ProductDetail | null> {
+    const skuHint = options?.externalSku ?? extractProductCodeFromUrl(pageUrl);
+
+    // Capture rich DOM fields (description, brand, real stock signal, gallery
+    // image) while we're still on the actual product detail page — fallback
+    // navigations below land on category/search listings that don't carry
+    // per-product detail.
+    let match = await this.loadAndParse(page, pageUrl, skuHint);
+    const domFields = await extractPdpDomFields(page, this.slug, skuHint);
+    const imageCandidates = skuHint ? henryScheinImageUrlsForCode(skuHint) : [];
+    match = mergeDomFields(match, domFields, imageCandidates);
+    if (hasValidPrice(match)) return match;
+
+    for (const fallbackUrl of henryScheinFallbackUrls(pageUrl, skuHint)) {
+      if (fallbackUrl === pageUrl) continue;
+      const fallbackMatch = mergeDomFields(
+        await this.loadAndParse(page, fallbackUrl, skuHint),
+        domFields,
+        imageCandidates,
+      );
+      if (hasValidPrice(fallbackMatch)) return fallbackMatch;
+      match = fallbackMatch ?? match;
+    }
+
+    return match;
+  }
+
+  private async loadAndParse(
+    page: Page,
+    url: string,
+    skuHint?: string | null,
+  ): Promise<ProductDetail | null> {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: PAGE_TIMEOUT_MS });
     await page.waitForTimeout(PAGE_WAIT_MS);
     const products = await parsePageProducts(page);
-    if (products.length === 0) return null;
-    const match =
-      products.find((p) => p.url === pageUrl || pageUrl.includes(p.externalSku ?? "")) ??
-      products[0];
-    return match ?? null;
+    return pickProductMatch(products, url, skuHint);
   }
 
   /**
    * Scrape a single category using a provided Page (shared browser).
    * The caller is responsible for browser lifecycle.
+   *
+   * This is listing-only (fast) — for full PDP-level enrichment (description/
+   * brand/image/real login-required stock), see
+   * `enrichProductsWithPdpFields` in `scrapers/enrich-listing-products.ts`,
+   * used as an explicit opt-in step by the seed scripts.
    */
   async scrapeCategoryWithPage(
     page: Page,
     categoryPath: string,
     maxPages?: number,
+    abortCheck?: () => Promise<void>,
   ): Promise<ProductDetail[]> {
     const results: ProductDetail[] = [];
     let pageNum = 1;
     let emptyPages = 0;
 
     while (emptyPages < 2) {
+      if (abortCheck) await abortCheck();
       if (maxPages != null && pageNum > maxPages) break;
       const url =
         pageNum === 1
@@ -97,6 +143,27 @@ export class HenryScheinAdapter implements SupplierAdapter {
     const context = await browser.newContext(BROWSER_CONTEXT_OPTIONS);
     return { browser, context };
   }
+}
+
+function henryScheinFallbackUrls(pageUrl: string, sku?: string | null): string[] {
+  if (!sku) return [];
+
+  const urls: string[] = [];
+
+  if (!pageUrl.includes("ProductCode=")) {
+    try {
+      const u = new URL(pageUrl);
+      u.searchParams.set("ProductCode", sku);
+      urls.push(u.toString());
+    } catch {
+      /* ignore */
+    }
+  }
+
+  urls.push(`${HENRY_SCHEIN_BASE}/au-en/search?ProductSearch=${encodeURIComponent(sku)}`);
+  urls.push(`${HENRY_SCHEIN_BASE}/search?ProductSearch=${encodeURIComponent(sku)}`);
+
+  return urls;
 }
 
 function deduplicateBySku(products: ProductDetail[]): ProductDetail[] {

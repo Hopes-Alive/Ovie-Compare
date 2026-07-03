@@ -22,7 +22,7 @@ type ProductResultsPanelProps = {
   products: ProductCardData[];
   stats: ResponseStats;
   cheapestGroupKey: string | null;
-  onPriceUpdate?: (productId: string, newPrice: number) => void;
+  onProductUpdate?: (productId: string, updates: Partial<ProductCardData>) => void;
   className?: string;
 };
 
@@ -35,7 +35,7 @@ export function ProductResultsPanel({
   products,
   stats,
   cheapestGroupKey,
-  onPriceUpdate,
+  onProductUpdate,
   className,
 }: ProductResultsPanelProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("supplier");
@@ -96,7 +96,7 @@ export function ProductResultsPanel({
         {multiSupplier ? (
           compact ? (
             <>
-              Expand a supplier below for individual products and live prices. Use{" "}
+              Expand a supplier below for individual products and current prices. Use{" "}
               <span className="font-medium text-foreground/80">Expand all</span> or{" "}
               <span className="font-medium text-foreground/80">By price</span> to change the
               view.
@@ -104,7 +104,9 @@ export function ProductResultsPanel({
           ) : (
             <>
               Each supplier is grouped below — expand a section to see individual products,
-              photos, and live price links. Tap{" "}
+              photos, and supplier links. Use{" "}
+              <span className="font-medium text-foreground/80">Check current status</span> on each
+              card to refresh price and stock. Tap{" "}
               <span className="font-medium text-foreground/80">Expand all</span> to open
               everything at once, or switch to{" "}
               <span className="font-medium text-foreground/80">By price</span> to rank every
@@ -113,8 +115,9 @@ export function ProductResultsPanel({
           )
         ) : (
           <>
-            Expand below to see individual products, photos, and links to check live prices
-            on the supplier site.
+            Expand below to see individual products, photos, and use{" "}
+            <span className="font-medium text-foreground/80">Check current status</span> to
+            refresh price and stock from the supplier site.
           </>
         )}
       </p>
@@ -183,7 +186,7 @@ export function ProductResultsPanel({
                   <ProductCard
                     key={product.id}
                     product={product}
-                    onPriceUpdate={onPriceUpdate}
+                    onProductUpdate={onProductUpdate}
                     showSupplierBadge={false}
                     variant="embedded"
                     supplierSlug={group.slug}
@@ -204,7 +207,7 @@ export function ProductResultsPanel({
             >
               <ProductCard
                 product={product}
-                onPriceUpdate={onPriceUpdate}
+                onProductUpdate={onProductUpdate}
                 showSupplierBadge
                 variant="embedded"
                 supplierSlug={product.supplier_slug}

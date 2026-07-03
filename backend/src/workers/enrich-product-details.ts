@@ -1,9 +1,9 @@
 /**
  * Product detail enrichment worker.
  *
- * Visits individual product pages to extract fields not available on listing pages:
- *   - description  (.widget-product-field-ProductDescription)
- *   - brand        (.widget-product-field-CUS_BrandText)  — fills gaps left by listing parser
+ * Visits individual product pages to backfill fields not available on listing
+ * pages (description, brand, image) using the shared `extractPdpDomFields`
+ * helper — the same DOM extraction used by live check / AI read.
  *
  * Both Henry Schein and Adam Dental run on the same SAP Commerce platform
  * so the selectors are identical.
@@ -17,14 +17,13 @@
 import "dotenv/config";
 import { chromium, type Page } from "playwright";
 import { supabase } from "../lib/supabase.js";
-import { extractProductPageImageUrl } from "../lib/product-images.js";
+import { extractPdpDomFields } from "../lib/extract-pdp-dom-fields.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const PAGE_WAIT_MS = 3000;
 const DELAY_BETWEEN_MS = 700;
 const PAGE_TIMEOUT_MS = 30_000;
-const SELECTOR_TIMEOUT_MS = 2000;
 
 const BROWSER_OPTIONS = {
   locale: "en-AU",
@@ -49,24 +48,6 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function locatorText(
-  page: Page,
-  selector: string,
-  minLength = 5,
-): Promise<string | undefined> {
-  try {
-    const text = await page.locator(selector).first().textContent({ timeout: SELECTOR_TIMEOUT_MS });
-    // Clean up spec table artifacts (___) and normalise whitespace
-    const cleaned = text
-      ?.replace(/_{2,}/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    return cleaned && cleaned.length >= minLength ? cleaned : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 // ── Per-page extraction ───────────────────────────────────────────────────────
 
 interface DetailResult {
@@ -78,7 +59,8 @@ interface DetailResult {
 async function extractDetail(
   page: Page,
   productUrl: string,
-  supplierSlug: string
+  supplierSlug: string,
+  externalSku?: string | null,
 ): Promise<DetailResult | null> {
   // Skip search-fallback URLs — product detail page won't be found
   if (productUrl.includes("/search?") || productUrl.includes("ProductCode=")) return null;
@@ -87,9 +69,10 @@ async function extractDetail(
     await page.goto(productUrl, { waitUntil: "domcontentloaded", timeout: PAGE_TIMEOUT_MS });
     await page.waitForTimeout(PAGE_WAIT_MS);
 
-    const description = await locatorText(page, ".widget-product-field-ProductDescription", 15);
-    const brand = await locatorText(page, ".widget-product-field-CUS_BrandText", 1);
-    const imageSrc = await extractProductPageImageUrl(page, supplierSlug);
+    const dom = await extractPdpDomFields(page, supplierSlug, externalSku);
+    const description = dom.description ?? undefined;
+    const brand = dom.brandField ?? undefined;
+    const imageSrc = dom.imageSrc ?? undefined;
 
     if (!description && !brand && !imageSrc) return null;
     return { description, brand, imageSrc };
@@ -124,7 +107,7 @@ async function main() {
   // Target: products missing description OR missing brand with a real product URL
   let query = supabase
     .from("supplier_products")
-    .select("id, supplier_product_url, name, brand, description, image_src, suppliers!inner(slug)")
+    .select("id, supplier_product_url, name, brand, description, image_src, external_sku, suppliers!inner(slug)")
     .eq("is_active", true)
     .not("supplier_product_url", "is", null)
     .not("supplier_product_url", "ilike", "%/search?%")
@@ -161,7 +144,7 @@ async function main() {
 
       process.stdout.write(`[${i + 1}/${products.length}] ${String(product.name).slice(0, 55)}\n`);
 
-      const detail = await extractDetail(page, url, supplierSlug);
+      const detail = await extractDetail(page, url, supplierSlug, product.external_sku as string | null);
 
       if (!detail) {
         skipped++;

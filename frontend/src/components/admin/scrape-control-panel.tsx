@@ -28,8 +28,10 @@ const INTERVAL_PRESETS = [
 type ScrapeControlPanelProps = {
   suppliers: SupplierSummary[];
   scrapeRunning: boolean;
+  scrapeStopping: boolean;
   onSuppliersChange: (suppliers: SupplierSummary[]) => void;
   onRunningChange: (running: boolean) => void;
+  onStoppingChange: (stopping: boolean) => void;
 };
 
 function formatLastScrape(iso: string | null): string {
@@ -47,29 +49,62 @@ function supplierInitial(name: string): string {
   return name.trim().charAt(0).toUpperCase() || "?";
 }
 
-function ScrapeStatusStrip({ running }: { running: boolean }) {
+function ScrapeStatusStrip({
+  running,
+  stopping,
+}: {
+  running: boolean;
+  stopping: boolean;
+}) {
+  const active = running || stopping;
   return (
     <div
       className={cn(
         "flex items-center gap-3 rounded-lg border px-3 py-2.5",
-        running
-          ? "border-amber-200 bg-amber-50/80"
+        active
+          ? stopping
+            ? "border-orange-200 bg-orange-50/80"
+            : "border-amber-200 bg-amber-50/80"
           : "border-[var(--admin-border)] bg-[var(--admin-bg)]",
       )}
     >
-      {running ? (
+      {active ? (
         <>
           <span className="relative flex size-2.5 shrink-0">
-            <span className="absolute inline-flex size-full animate-ping rounded-full bg-amber-400 opacity-70" />
-            <span className="relative inline-flex size-2.5 rounded-full bg-amber-500" />
+            <span
+              className={cn(
+                "absolute inline-flex size-full rounded-full opacity-70",
+                stopping ? "animate-pulse bg-orange-400" : "animate-ping bg-amber-400",
+              )}
+            />
+            <span
+              className={cn(
+                "relative inline-flex size-2.5 rounded-full",
+                stopping ? "bg-orange-500" : "bg-amber-500",
+              )}
+            />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-amber-900">Scrape in progress</p>
-            <p className="text-xs text-amber-800/80">
-              Suppliers run in parallel. Live panels update below.
+            <p
+              className={cn(
+                "text-sm font-medium",
+                stopping ? "text-orange-900" : "text-amber-900",
+              )}
+            >
+              {stopping ? "Stopping scrape…" : "Scrape in progress"}
+            </p>
+            <p className={cn("text-xs", stopping ? "text-orange-800/80" : "text-amber-800/80")}>
+              {stopping
+                ? "Finishing the current page, then the run will end."
+                : "Suppliers run in parallel. Live panels update below."}
             </p>
           </div>
-          <Loader2 className="size-4 shrink-0 animate-spin text-amber-600" />
+          <Loader2
+            className={cn(
+              "size-4 shrink-0 animate-spin",
+              stopping ? "text-orange-600" : "text-amber-600",
+            )}
+          />
         </>
       ) : (
         <>
@@ -187,8 +222,10 @@ function SupplierScheduleCard({
 export function ScrapeControlPanel({
   suppliers,
   scrapeRunning,
+  scrapeStopping,
   onSuppliersChange,
   onRunningChange,
+  onStoppingChange,
 }: ScrapeControlPanelProps) {
   const [logs, setLogs] = useState<ScrapeLogLine[]>([]);
   const [jobIds, setJobIds] = useState<string[]>([]);
@@ -207,13 +244,15 @@ export function ScrapeControlPanel({
     try {
       const overviewRes = await fetch("/api/admin/overview");
       const overview = (await overviewRes.json()) as {
-        scrape?: { running: boolean; jobIds?: string[] };
+        scrape?: { running: boolean; cancelRequested?: boolean; jobIds?: string[] };
         suppliers?: SupplierSummary[];
       };
 
       if (overview.suppliers) onSuppliersChange(overview.suppliers);
       const running = overview.scrape?.running ?? false;
+      const stopping = running && (overview.scrape?.cancelRequested ?? false);
       onRunningChange(running);
+      onStoppingChange(stopping);
 
       const activeJobIds = overview.scrape?.jobIds ?? [];
       if (activeJobIds.length > 0) {
@@ -253,7 +292,7 @@ export function ScrapeControlPanel({
     } catch {
       /* ignore poll errors */
     }
-  }, [onRunningChange, onSuppliersChange]);
+  }, [onRunningChange, onStoppingChange, onSuppliersChange]);
 
   useEffect(() => {
     void poll();
@@ -292,6 +331,7 @@ export function ScrapeControlPanel({
     setError(null);
     try {
       await fetch("/api/admin/scrape", { method: "DELETE" });
+      onStoppingChange(true);
       void poll();
     } catch {
       setError("Failed to cancel scrape");
@@ -338,7 +378,7 @@ export function ScrapeControlPanel({
         contentClassName="p-4"
       >
         <div className="space-y-4">
-          <ScrapeStatusStrip running={scrapeRunning} />
+          <ScrapeStatusStrip running={scrapeRunning} stopping={scrapeStopping} />
 
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -357,15 +397,15 @@ export function ScrapeControlPanel({
             <Button
               size="sm"
               variant="destructive"
-              disabled={!scrapeRunning || cancelling}
+              disabled={!scrapeRunning || cancelling || scrapeStopping}
               onClick={() => void handleCancel()}
             >
-              {cancelling ? (
+              {cancelling || scrapeStopping ? (
                 <Loader2 className="animate-spin" data-icon="inline-start" />
               ) : (
                 <Square data-icon="inline-start" className="size-3.5" />
               )}
-              Stop scrape
+              {scrapeStopping ? "Stopping…" : "Stop scrape"}
             </Button>
           </div>
 

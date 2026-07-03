@@ -11,7 +11,7 @@ import type { ChatMessage, ProductCardData } from "@/types/chat";
 type MessageListProps = {
   messages: ChatMessage[];
   productOverrides?: Record<string, ProductCardData>;
-  onPriceUpdate?: (productId: string, newPrice: number) => void;
+  onProductUpdate?: (productId: string, updates: Partial<ProductCardData>) => void;
   isLoading?: boolean;
 };
 
@@ -22,7 +22,7 @@ function scrollAnchorIntoView(node: HTMLElement | null | undefined) {
 export function MessageList({
   messages,
   productOverrides,
-  onPriceUpdate,
+  onProductUpdate,
   isLoading,
 }: MessageListProps) {
   const compact = useChatPanelCompact();
@@ -103,7 +103,7 @@ export function MessageList({
               <MessageBubble
                 message={message}
                 products={products}
-                onPriceUpdate={onPriceUpdate}
+                onProductUpdate={onProductUpdate}
                 isStreaming={isStreaming}
               />
             </div>

@@ -11,7 +11,11 @@ import pg from "pg";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = resolve(__dirname, "../../supabase/migrations");
 
-const FILES = ["003_supplier_refresh_schedule.sql", "004_scrape_job_logs.sql"];
+const FILES = [
+  "003_supplier_refresh_schedule.sql",
+  "004_scrape_job_logs.sql",
+  "005_ai_read_price_source.sql",
+];
 
 async function main() {
   const url = process.env.DATABASE_URL;

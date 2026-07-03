@@ -17,7 +17,7 @@ import {
   createScrapeJob,
   finishScrapeJob,
   failScrapeJob,
-  hasRunningRefreshJob,
+  hasActiveScrapeJob,
   isJobCancelRequested,
   type ScrapeJobTriggeredBy,
 } from "./scrape-job.js";
@@ -39,11 +39,14 @@ export type SupplierRow = {
   last_scheduled_refresh_at: string | null;
 };
 
+type AbortCheck = () => Promise<void>;
+
 type CategoryAdapter = SupplierAdapter & {
   scrapeCategoryWithPage(
     page: Page,
     categoryPath: string,
     maxPages?: number,
+    abortCheck?: AbortCheck,
   ): Promise<import("../../types/scraper.js").ProductDetail[]>;
 };
 
@@ -230,6 +233,7 @@ async function runCategoryPass(
         page,
         category.path,
         options.categoryPageLimit,
+        () => checkCancelled(jobId),
       );
       if (products.length > 0) {
         const stats = await upsertProducts({
@@ -312,7 +316,7 @@ async function runUrlPass(
 
   const { data: staleRows, error } = await supabase
     .from("supplier_products")
-    .select("id, supplier_product_url, name")
+    .select("id, supplier_product_url, name, external_sku")
     .eq("supplier_id", supplier.id)
     .eq("is_active", true)
     .or(`last_checked_at.is.null,last_checked_at.lt.${cycleStartedAt}`)
@@ -346,7 +350,9 @@ async function runUrlPass(
     const label = (row.name as string)?.slice(0, 60) ?? url;
 
     try {
-      const product = await adapter.parseProductPage(page, url);
+      const product = await adapter.parseProductPage(page, url, {
+        externalSku: row.external_sku as string | null,
+      });
       if (!product) {
         stats.failed++;
         await appendScrapeLog(jobId, "error", `[${supplier.slug}]   ✗ ${label} — parse failed`, {
@@ -518,7 +524,7 @@ export async function runSuppliersRefreshParallel(
 ): Promise<{ jobIds: string[]; cancelled: boolean }> {
   const eligible: SupplierRow[] = [];
   for (const supplier of suppliers) {
-    if (await hasRunningRefreshJob(supplier.id)) continue;
+    if (await hasActiveScrapeJob(supplier.id)) continue;
     eligible.push(supplier);
   }
 

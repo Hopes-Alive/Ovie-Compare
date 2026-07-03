@@ -9,6 +9,8 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { chatHandler } from "./chat.js";
+import { liveCheckHandler } from "./live-check.js";
+import { aiProductReadHandler } from "./ai-product-read.js";
 import { getChatDesignHandler, patchChatDesignHandler } from "./chat-design.js";
 import { getAdminAnalyticsHandler } from "./analytics.js";
 import { getAdminSuppliersHandler, patchAdminSupplierHandler } from "./admin-suppliers.js";
@@ -40,6 +42,12 @@ app.get("/health", (c) => c.json({ status: "ok", service: "ovie-brain" }));
 // Chat brain endpoint
 app.post("/api/chat", chatHandler);
 
+// Live price check (SSE stream)
+app.post("/api/live-check", liveCheckHandler);
+
+// AI product read (Playwright + LLM, SSE stream)
+app.post("/api/ai-product-read", aiProductReadHandler);
+
 // Chat shell theme (public read, admin write)
 app.get("/api/chat-design", getChatDesignHandler);
 app.patch("/api/admin/chat-design", patchChatDesignHandler);
@@ -67,6 +75,8 @@ const PORT = Number(process.env.PORT ?? 4000);
 serve({ fetch: app.fetch, port: PORT }, () => {
   console.log(`\x1b[36m\x1b[1m[Ovie Brain API]\x1b[0m  listening on http://localhost:${PORT}`);
   console.log(`  POST http://localhost:${PORT}/api/chat`);
+  console.log(`  POST http://localhost:${PORT}/api/live-check`);
+  console.log(`  POST http://localhost:${PORT}/api/ai-product-read`);
   console.log(`  GET  http://localhost:${PORT}/api/chat-design`);
   console.log(`  PATCH http://localhost:${PORT}/api/admin/chat-design`);
   console.log(`  GET  http://localhost:${PORT}/api/admin/analytics`);
