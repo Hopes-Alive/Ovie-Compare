@@ -1,17 +1,25 @@
 import { chatClient, CHAT_MODEL } from "../brain/llm-client.js";
-import type { PageSnapshot } from "./capture-page-snapshot.js";
+import type { EnrichedPageSnapshot } from "./enrich-snapshot.js";
 import type { AiExtractionResult, AiReadContext } from "./types.js";
 
 const SYSTEM_PROMPT = `You extract structured product data from Australian dental supplier product pages.
+Compare live page data against currentDatabase and return ALL product fields you can verify on the page.
 Rules:
-- Only extract values visible in the provided page content or window.products JSON.
+- Only extract values visible in the snapshot (pageText, windowProducts, domProductData, description, breadcrumbs).
 - Never invent or guess prices. If price is not visible, set price to null and confidence to "low".
 - Prices are AUD including GST unless clearly marked ex GST (then still report inc GST if both shown).
 - Prefer window.products PriceForOneInc when present.
 - stockStatus: in_stock, out_of_stock, low_stock, or unknown.
-- If stock is not clearly stated on the page, keep currentDatabase.stockStatus — do not set unknown when the page simply omits stock.
+- stockQuantity: integer when AvailableQty or explicit stock count is on the page; otherwise null.
+- If stock is not clearly stated, keep currentDatabase.stock_status — do not set unknown when the page simply omits stock.
 - Set loginRequired true when page says login/call us to see price.
+- category/subcategory: from breadcrumbs or CategoryHierarchy when visible.
+- description: product description text only, not marketing boilerplate.
 - confidence "high" only when price and name are clearly supported by the snapshot.`;
+
+function parseOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
 
 function parseExtraction(raw: string): AiExtractionResult {
   const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -33,12 +41,34 @@ function parseExtraction(raw: string): AiExtractionResult {
     price = Number.isFinite(n) ? n : null;
   }
 
+  let stockQuantity: number | null = null;
+  if (parsed.stockQuantity != null && parsed.stockQuantity !== "") {
+    const n = Number(parsed.stockQuantity);
+    stockQuantity = Number.isFinite(n) ? Math.trunc(n) : null;
+  }
+
+  const parseOptionalDays = (v: unknown): number | null => {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.trunc(n) : null;
+  };
+
   return {
+    externalSku: parseOptionalString(parsed.externalSku),
     price,
     stockStatus: validStock,
+    stockQuantity,
     name: typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : "",
-    brand: typeof parsed.brand === "string" ? parsed.brand : null,
-    packSize: typeof parsed.packSize === "string" ? parsed.packSize : null,
+    brand: parseOptionalString(parsed.brand),
+    category: parseOptionalString(parsed.category),
+    subcategory: parseOptionalString(parsed.subcategory),
+    description: parseOptionalString(parsed.description),
+    imageSrc: parseOptionalString(parsed.imageSrc),
+    packSize: parseOptionalString(parsed.packSize),
+    unitOfMeasure: parseOptionalString(parsed.unitOfMeasure),
+    deliveryText: parseOptionalString(parsed.deliveryText),
+    deliveryMinDays: parseOptionalDays(parsed.deliveryMinDays),
+    deliveryMaxDays: parseOptionalDays(parsed.deliveryMaxDays),
     loginRequired: Boolean(parsed.loginRequired),
     confidence,
     notes: typeof parsed.notes === "string" ? parsed.notes : undefined,
@@ -46,34 +76,50 @@ function parseExtraction(raw: string): AiExtractionResult {
 }
 
 export async function extractWithLlm(
-  snapshot: PageSnapshot,
+  snapshot: EnrichedPageSnapshot,
   context: AiReadContext,
 ): Promise<AiExtractionResult> {
   const userContent = JSON.stringify(
     {
-      task: "Extract current product fields from this supplier page snapshot.",
+      task: "Extract all current product fields from this supplier page snapshot. Compare with currentDatabase.",
       supplier: context.supplierName,
       productUrl: context.url,
-      currentDatabase: {
-        name: context.dbName,
-        price: context.dbPrice,
-        sku: context.dbSku,
-        brand: context.dbBrand,
-        packSize: context.dbPackSize,
-        stockStatus: context.dbStockStatus,
+      currentDatabase: context.currentDatabase,
+      pageSnapshot: {
+        pageTitle: snapshot.pageTitle,
+        h1: snapshot.h1,
+        breadcrumbs: snapshot.breadcrumbs,
+        description: snapshot.description,
+        brandField: snapshot.brandField,
+        deliveryText: snapshot.deliveryText,
+        imageUrls: snapshot.imageUrls,
+        pageText: snapshot.parsedProduct
+          ? snapshot.pageText.slice(0, 2500)
+          : snapshot.pageText,
+        windowProducts: snapshot.windowProducts,
+        domProductData: snapshot.domProductData,
+        loginHintDetected: snapshot.loginHint,
+        adapterParsed: snapshot.parsedProduct,
       },
-      pageText: snapshot.pageText,
-      windowProducts: snapshot.windowProducts,
-      loginHintDetected: snapshot.loginHint,
       requiredJsonShape: {
-        price: "number | null (AUD inc GST)",
-        stockStatus: "in_stock | out_of_stock | low_stock | unknown",
+        externalSku: "string | null",
         name: "string",
         brand: "string | null",
+        category: "string | null",
+        subcategory: "string | null",
+        description: "string | null",
+        imageSrc: "string | null",
         packSize: "string | null",
+        unitOfMeasure: "string | null",
+        price: "number | null (AUD inc GST)",
+        stockStatus: "in_stock | out_of_stock | low_stock | unknown",
+        stockQuantity: "integer | null",
+        deliveryText: "string | null",
+        deliveryMinDays: "integer | null",
+        deliveryMaxDays: "integer | null",
         loginRequired: "boolean",
         confidence: "high | low",
-        notes: "string optional",
+        notes: "string optional — list fields that changed vs currentDatabase",
       },
     },
     null,

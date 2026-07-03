@@ -1,3 +1,5 @@
+import { Loader2 } from "lucide-react";
+
 import type { LiveCheckState } from "@/types/chat";
 
 import { ProductCheckResultPanel } from "@/components/chat/product-check-result-panel";
@@ -11,15 +13,26 @@ export function LiveCheckProgress({ state }: LiveCheckProgressProps) {
 
   if (state.phase === "checking") {
     return (
-      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        Checking supplier website for current price and stock… usually 5–10 seconds
+      <div
+        className="rounded-lg border border-emerald-200/80 bg-emerald-50/50 px-3 py-2.5 text-xs text-emerald-900"
+        role="status"
+        aria-live="polite"
+      >
+        <div className="flex items-center gap-2">
+          <Loader2 className="size-3.5 shrink-0 animate-spin text-emerald-600" />
+          <span>Checking supplier website for current price and stock…</span>
+        </div>
       </div>
     );
   }
 
   if (state.phase === "progress") {
     return (
-      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+      <div
+        className="rounded-lg border border-emerald-200/80 bg-emerald-50/50 px-3 py-2.5 text-xs text-emerald-900"
+        role="status"
+        aria-live="polite"
+      >
         Checking {state.supplier}…
       </div>
     );
@@ -27,7 +40,10 @@ export function LiveCheckProgress({ state }: LiveCheckProgressProps) {
 
   if (state.phase === "error") {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
+      <div
+        className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-900"
+        role="alert"
+      >
         {state.message}
       </div>
     );
@@ -40,6 +56,7 @@ export function LiveCheckProgress({ state }: LiveCheckProgressProps) {
       changes={state.changes}
       oldPrice={state.oldPrice}
       newPrice={state.newPrice}
+      oldStockStatus={state.oldStockStatus}
       stockStatus={state.stockStatus}
     />
   );

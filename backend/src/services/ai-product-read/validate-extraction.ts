@@ -1,7 +1,9 @@
 import type { ProductDetail } from "../../types/scraper.js";
-import type { PageSnapshot, WindowProductEntry } from "./capture-page-snapshot.js";
+import type { WindowProductEntry } from "./capture-page-snapshot.js";
 import type { AiExtractionResult } from "./types.js";
 import type { LiveCheckProductRow } from "../live-check/types.js";
+import type { EnrichedPageSnapshot } from "./enrich-snapshot.js";
+import { mergeExtraction } from "./merge-extraction.js";
 
 function parseWindowPrice(entry: WindowProductEntry): number | null {
   const raw = entry.PriceForOneInc ?? entry.PriceForOneEx;
@@ -11,7 +13,7 @@ function parseWindowPrice(entry: WindowProductEntry): number | null {
 }
 
 /** Best price from window.products for cross-check. */
-export function referencePriceFromSnapshot(snapshot: PageSnapshot): number | null {
+export function referencePriceFromSnapshot(snapshot: { windowProducts: WindowProductEntry[] }): number | null {
   for (const entry of snapshot.windowProducts) {
     const p = parseWindowPrice(entry);
     if (p != null) return p;
@@ -45,32 +47,63 @@ function resolveStockStatus(
   return "unknown";
 }
 
+export function buildAiReadContext(row: LiveCheckProductRow): import("./types.js").AiReadContext {
+  return {
+    url: row.supplier_product_url,
+    supplierName: row.suppliers.name,
+    supplierSlug: row.suppliers.slug,
+    currentDatabase: {
+      external_id: row.external_id,
+      external_sku: row.external_sku,
+      supplier_product_url: row.supplier_product_url,
+      name: row.name,
+      brand: row.brand,
+      category: row.category,
+      subcategory: row.subcategory,
+      description: row.description,
+      image_src: row.image_src,
+      pack_size: row.pack_size,
+      unit_of_measure: row.unit_of_measure,
+      price: row.price != null ? Number(row.price) : null,
+      currency: row.currency,
+      price_includes_gst: row.price_includes_gst,
+      stock_status: row.stock_status,
+      stock_quantity: row.stock_quantity,
+      delivery_text: row.delivery_text,
+      delivery_min_days: row.delivery_min_days,
+      delivery_max_days: row.delivery_max_days,
+    },
+  };
+}
+
 export function validateExtraction(
   extraction: AiExtractionResult,
-  snapshot: PageSnapshot,
+  snapshot: EnrichedPageSnapshot,
   row: LiveCheckProductRow,
 ): ValidatedExtraction {
   const refPrice = referencePriceFromSnapshot(snapshot);
   const loginRequired = extraction.loginRequired || snapshot.loginHint;
+  const parsed = snapshot.parsedProduct;
 
-  if (loginRequired && (extraction.price == null || extraction.price <= 0)) {
+  if (loginRequired && (extraction.price == null || extraction.price <= 0) && !hasParsedPrice(parsed)) {
+    const product = mergeExtraction(snapshot, {
+      ...extraction,
+      price: row.price != null ? Number(row.price) : null,
+      stockStatus: resolveStockStatus(extraction, row) ?? "unknown",
+      loginRequired: true,
+    }, parsed);
     return {
       product: {
-        url: row.supplier_product_url,
-        name: extraction.name || row.name,
-        externalSku: row.external_sku ?? undefined,
-        brand: extraction.brand ?? row.brand ?? undefined,
-        packSize: extraction.packSize ?? row.pack_size ?? undefined,
+        ...product,
         price: row.price != null ? Number(row.price) : undefined,
-        stockStatus: resolveStockStatus(extraction, row),
-        raw: { login_required: true, ai_notes: extraction.notes },
+        raw: { ...product.raw, login_required: true, ai_notes: extraction.notes },
       },
       loginRequired: true,
       notes: extraction.notes ?? "Price requires supplier login",
     };
   }
 
-  if (extraction.confidence === "low" && extraction.price == null) {
+  if (extraction.confidence === "low" && extraction.price == null && !hasParsedPrice(parsed)) {
     throw new Error(extraction.notes ?? "AI could not confidently read a price from this page");
   }
 
@@ -85,28 +118,18 @@ export function validateExtraction(
     }
   }
 
-  const name = extraction.name.trim() || row.name;
-  if (!name) {
+  const merged = mergeExtraction(snapshot, extraction, parsed);
+  if (!merged.name?.trim()) {
     throw new Error("AI could not determine product name");
   }
 
   return {
-    product: {
-      url: row.supplier_product_url,
-      name,
-      externalSku: row.external_sku ?? undefined,
-      brand: extraction.brand ?? row.brand ?? undefined,
-      packSize: extraction.packSize ?? row.pack_size ?? undefined,
-      price: extraction.price ?? undefined,
-      stockStatus: resolveStockStatus(extraction, row),
-      raw: {
-        ai_read: true,
-        ai_confidence: extraction.confidence,
-        ai_notes: extraction.notes,
-        window_products_count: snapshot.windowProducts.length,
-      },
-    },
+    product: merged,
     loginRequired: false,
     notes: extraction.notes,
   };
+}
+
+function hasParsedPrice(parsed: ProductDetail | null | undefined): boolean {
+  return parsed?.price != null && parsed.price > 0;
 }

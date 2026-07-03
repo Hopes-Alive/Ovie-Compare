@@ -1,4 +1,5 @@
 import type { ProductDetail } from "../types/scraper.js";
+import { isPlaceholderImageUrl, type PdpDomFields } from "../lib/extract-pdp-dom-fields.js";
 
 export type ParseProductPageOptions = {
   externalSku?: string | null;
@@ -64,4 +65,38 @@ export function categoryPathFromProduct(
 ): string | null {
   const hierarchy = (product?.raw as { CategoryHierarchy?: string } | undefined)?.CategoryHierarchy;
   return categoryPathFromHierarchy(hierarchy);
+}
+
+/**
+ * Fill gaps in a `window.products`/`data-product-data` parse with fields only
+ * visible in the rendered DOM of the actual product detail page (description,
+ * brand, delivery text, a higher-confidence image, and — critically — a real
+ * stock signal for login-gated/APHRA-restricted products where AvailableQty
+ * is never exposed). Never overwrites a value the structured parse already
+ * found; only fills nulls/placeholders/"unknown".
+ */
+export function mergeDomFields(
+  detail: ProductDetail | null,
+  domFields: PdpDomFields,
+  fallbackImageCandidates: string[] = [],
+): ProductDetail | null {
+  if (!detail) return null;
+
+  const description = detail.description ?? domFields.description ?? undefined;
+  const brand = detail.brand ?? domFields.brandField ?? undefined;
+  const deliveryText = detail.deliveryText ?? domFields.deliveryText ?? undefined;
+
+  const currentImageOk = !isPlaceholderImageUrl(detail.imageSrc);
+  const imageSrc = currentImageOk
+    ? detail.imageSrc
+    : (domFields.imageSrc ??
+      fallbackImageCandidates.find((u) => !isPlaceholderImageUrl(u)) ??
+      detail.imageSrc);
+
+  const stockStatus =
+    detail.stockStatus && detail.stockStatus !== "unknown"
+      ? detail.stockStatus
+      : (domFields.stockStatus ?? detail.stockStatus);
+
+  return { ...detail, description, brand, deliveryText, imageSrc, stockStatus };
 }

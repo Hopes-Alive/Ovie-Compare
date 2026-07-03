@@ -1,10 +1,13 @@
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import type { ParseProductPageOptions, ProductDetail, SupplierAdapter } from "../../types/scraper.js";
 import { buildContentHash } from "../base-adapter.js";
+import { extractPdpDomFields } from "../../lib/extract-pdp-dom-fields.js";
+import { adamDentalImageUrlsForCode } from "../../lib/product-images.js";
 import {
   categoryPathFromProduct,
   extractProductCodeFromUrl,
   hasValidPrice,
+  mergeDomFields,
   pickProductMatch,
 } from "../parse-product-helpers.js";
 import { parsePageProducts, cleanProductUrl } from "./parser.js";
@@ -48,9 +51,15 @@ export class AdamDentalAdapter implements SupplierAdapter {
   ): Promise<ProductDetail | null> {
     const canonicalUrl = cleanProductUrl(pageUrl);
     const skuHint = options?.externalSku ?? extractProductCodeFromUrl(pageUrl);
+    const imageCandidates = skuHint ? adamDentalImageUrlsForCode(skuHint) : [];
 
     // 1) Product detail page — stock/name; price often hidden ("Call us!") on APHRA items.
     let match = await this.loadAndParse(page, canonicalUrl, skuHint);
+    // Capture rich DOM fields (description, brand, real stock signal, gallery
+    // image) while still on the canonical PDP — steps 2/3 below land on
+    // category/search listings that don't carry per-product detail.
+    const domFields = await extractPdpDomFields(page, this.slug, skuHint);
+    match = mergeDomFields(match, domFields, imageCandidates);
     match = finalizeAdamMatch(match, canonicalUrl);
     if (hasValidPrice(match)) return match;
 
@@ -59,7 +68,10 @@ export class AdamDentalAdapter implements SupplierAdapter {
     if (categoryPath && skuHint && !isCategoryListingUrl(canonicalUrl, categoryPath)) {
       const categoryUrl = `${ADAM_DENTAL_BASE}${categoryPath}`;
       const categoryMatch = await this.loadAndParse(page, categoryUrl, skuHint);
-      const resolved = finalizeAdamMatch(categoryMatch, canonicalUrl);
+      const resolved = finalizeAdamMatch(
+        mergeDomFields(categoryMatch, domFields, imageCandidates),
+        canonicalUrl,
+      );
       if (hasValidPrice(resolved) && skuMatches(resolved, skuHint)) return resolved;
       if (resolved && skuMatches(resolved, skuHint) && !match) match = resolved;
     }
@@ -68,7 +80,10 @@ export class AdamDentalAdapter implements SupplierAdapter {
     if (skuHint && !pageUrl.includes("ProductSearch=")) {
       const searchUrl = `${ADAM_DENTAL_BASE}/search?ProductSearch=${encodeURIComponent(skuHint)}`;
       const listingMatch = await this.loadAndParse(page, searchUrl, skuHint);
-      const resolved = finalizeAdamMatch(listingMatch, canonicalUrl);
+      const resolved = finalizeAdamMatch(
+        mergeDomFields(listingMatch, domFields, imageCandidates),
+        canonicalUrl,
+      );
       if (hasValidPrice(resolved) && skuMatches(resolved, skuHint)) return resolved;
       if (resolved && skuMatches(resolved, skuHint) && !match) match = resolved;
     }
@@ -91,6 +106,11 @@ export class AdamDentalAdapter implements SupplierAdapter {
    * Scrape a single category using a provided Page (shared browser).
    * Clicks "Show More Products" until all products are loaded, then parses.
    * The caller is responsible for browser lifecycle.
+   *
+   * This is listing-only (fast) — for full PDP-level enrichment (description/
+   * brand/image/real login-required stock), see
+   * `enrichProductsWithPdpFields` in `scrapers/enrich-listing-products.ts`,
+   * used as an explicit opt-in step by the seed scripts.
    */
   async scrapeCategoryWithPage(
     page: Page,

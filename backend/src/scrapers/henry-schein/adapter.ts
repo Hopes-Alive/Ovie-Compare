@@ -1,9 +1,12 @@
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import type { ParseProductPageOptions, ProductDetail, SupplierAdapter } from "../../types/scraper.js";
 import { buildContentHash } from "../base-adapter.js";
+import { extractPdpDomFields } from "../../lib/extract-pdp-dom-fields.js";
+import { henryScheinImageUrlsForCode } from "../../lib/product-images.js";
 import {
   extractProductCodeFromUrl,
   hasValidPrice,
+  mergeDomFields,
   pickProductMatch,
 } from "../parse-product-helpers.js";
 import { parsePageProducts } from "./parser.js";
@@ -34,13 +37,25 @@ export class HenryScheinAdapter implements SupplierAdapter {
   ): Promise<ProductDetail | null> {
     const skuHint = options?.externalSku ?? extractProductCodeFromUrl(pageUrl);
 
+    // Capture rich DOM fields (description, brand, real stock signal, gallery
+    // image) while we're still on the actual product detail page — fallback
+    // navigations below land on category/search listings that don't carry
+    // per-product detail.
     let match = await this.loadAndParse(page, pageUrl, skuHint);
+    const domFields = await extractPdpDomFields(page, this.slug, skuHint);
+    const imageCandidates = skuHint ? henryScheinImageUrlsForCode(skuHint) : [];
+    match = mergeDomFields(match, domFields, imageCandidates);
     if (hasValidPrice(match)) return match;
 
     for (const fallbackUrl of henryScheinFallbackUrls(pageUrl, skuHint)) {
       if (fallbackUrl === pageUrl) continue;
-      match = await this.loadAndParse(page, fallbackUrl, skuHint);
-      if (hasValidPrice(match)) return match;
+      const fallbackMatch = mergeDomFields(
+        await this.loadAndParse(page, fallbackUrl, skuHint),
+        domFields,
+        imageCandidates,
+      );
+      if (hasValidPrice(fallbackMatch)) return fallbackMatch;
+      match = fallbackMatch ?? match;
     }
 
     return match;
@@ -60,6 +75,11 @@ export class HenryScheinAdapter implements SupplierAdapter {
   /**
    * Scrape a single category using a provided Page (shared browser).
    * The caller is responsible for browser lifecycle.
+   *
+   * This is listing-only (fast) — for full PDP-level enrichment (description/
+   * brand/image/real login-required stock), see
+   * `enrichProductsWithPdpFields` in `scrapers/enrich-listing-products.ts`,
+   * used as an explicit opt-in step by the seed scripts.
    */
   async scrapeCategoryWithPage(
     page: Page,

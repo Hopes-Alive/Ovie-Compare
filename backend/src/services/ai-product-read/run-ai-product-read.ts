@@ -12,7 +12,8 @@ import { validateProducts } from "../live-check/validate-products.js";
 import type { LiveCheckSseEvent, LiveCheckSummary } from "../live-check/types.js";
 import { captureSnapshotForProductRead } from "./enrich-snapshot.js";
 import { extractWithLlm } from "./extract-with-llm.js";
-import { validateExtraction } from "./validate-extraction.js";
+import { canUseParserFastPath, extractionFromSnapshot } from "./fast-extraction.js";
+import { validateExtraction, buildAiReadContext } from "./validate-extraction.js";
 
 export async function* runAiProductRead(
   productIds: string[],
@@ -101,17 +102,9 @@ export async function* runAiProductRead(
 
         try {
           const snapshot = await captureSnapshotForProductRead(page, row);
-          const extraction = await extractWithLlm(snapshot, {
-            url,
-            dbName: row.name,
-            dbPrice: oldPrice,
-            dbSku: row.external_sku,
-            dbBrand: row.brand,
-            dbPackSize: row.pack_size,
-            dbStockStatus: oldStock,
-            supplierName: row.suppliers.name,
-            supplierSlug: row.suppliers.slug,
-          });
+          const extraction = canUseParserFastPath(snapshot)
+            ? extractionFromSnapshot(snapshot)
+            : await extractWithLlm(snapshot, buildAiReadContext(row));
 
           const validated = validateExtraction(extraction, snapshot, row);
           const product = validated.product;

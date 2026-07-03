@@ -17,7 +17,7 @@ import {
   createScrapeJob,
   finishScrapeJob,
   failScrapeJob,
-  hasRunningRefreshJob,
+  hasActiveScrapeJob,
   isJobCancelRequested,
   type ScrapeJobTriggeredBy,
 } from "./scrape-job.js";
@@ -524,7 +524,7 @@ export async function runSuppliersRefreshParallel(
 ): Promise<{ jobIds: string[]; cancelled: boolean }> {
   const eligible: SupplierRow[] = [];
   for (const supplier of suppliers) {
-    if (await hasRunningRefreshJob(supplier.id)) continue;
+    if (await hasActiveScrapeJob(supplier.id)) continue;
     eligible.push(supplier);
   }
 

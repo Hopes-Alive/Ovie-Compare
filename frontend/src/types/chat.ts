@@ -60,6 +60,7 @@ export type LiveCheckState =
       result: "unchanged" | "changed" | "login_required";
       oldPrice: number | null;
       newPrice: number | null;
+      oldStockStatus?: string | null;
       stockStatus?: string | null;
       fieldsChanged?: string[];
       changes?: ProductCheckFieldChange[];
@@ -76,6 +77,7 @@ export type AiReadState =
       result: "unchanged" | "changed" | "login_required";
       oldPrice: number | null;
       newPrice: number | null;
+      oldStockStatus?: string | null;
       stockStatus?: string | null;
       fieldsChanged?: string[];
       changes?: ProductCheckFieldChange[];

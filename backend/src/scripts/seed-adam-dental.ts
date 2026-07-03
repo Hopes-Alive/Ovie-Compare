@@ -15,6 +15,7 @@ import type { ScrapeStats } from "../types/scraper.js";
 import { getSupplierIdBySlug } from "../services/scrape/scrape-job.js";
 import { loadProgressSet, saveProgressSet } from "../services/scrape/progress-file.js";
 import { upsertProducts } from "../services/scrape/upsert-products.js";
+import { enrichProductsWithPdpFields } from "../scrapers/enrich-listing-products.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = resolve(__dirname, "../../data");
@@ -24,9 +25,32 @@ const PROGRESS_FILE = resolve(DATA_DIR, "adam-dental-seed-progress.json");
 const CATEGORY_DELAY_MS = 2500;
 const adapter = new AdamDentalAdapter();
 
+/**
+ * --enrich-pdp        Visit each product's own page for description/brand/
+ *                      image/real stock (see docs/scraping.md). Off by
+ *                      default — much slower than the listing-only scrape.
+ * --enrich-limit <n>  Cap enriched products per category (for a quick test).
+ * --limit-categories <n>  Only process the first N pending categories.
+ */
+function getArg(name: string): string | null {
+  const idx = process.argv.indexOf(name);
+  return idx !== -1 ? (process.argv[idx + 1] ?? null) : null;
+}
+
+const enrichPdp = process.argv.includes("--enrich-pdp");
+const enrichLimitArg = getArg("--enrich-limit");
+const enrichLimit = enrichLimitArg ? parseInt(enrichLimitArg, 10) : undefined;
+const categoryLimitArg = getArg("--limit-categories");
+const categoryLimit = categoryLimitArg ? parseInt(categoryLimitArg, 10) : undefined;
+
 async function main() {
   console.log("Ovie Compare — Adam Dental full seed");
   console.log("=====================================\n");
+  if (enrichPdp) {
+    console.log(
+      `PDP enrichment: ON${enrichLimit != null ? ` (max ${enrichLimit}/category)` : " (all products)"}\n`,
+    );
+  }
 
   let categories: CategoryInfo[];
   if (existsSync(CATEGORIES_FILE)) {
@@ -44,10 +68,15 @@ async function main() {
   console.log(`Supplier ID: ${supplierId}\n`);
 
   const done = loadProgressSet(PROGRESS_FILE);
-  const pending = categories.filter((c) => !done.has(c.path));
+  let pending = categories.filter((c) => !done.has(c.path));
 
   if (done.size > 0) {
     console.log(`Resuming: ${done.size} categories already done, ${pending.length} remaining.\n`);
+  }
+
+  if (categoryLimit != null) {
+    pending = pending.slice(0, categoryLimit);
+    console.log(`Test mode: limiting this run to ${pending.length} categories.\n`);
   }
 
   const { browser, context } = await AdamDentalAdapter.launchBrowser();
@@ -88,7 +117,17 @@ async function main() {
       }
 
       try {
-        const products = await adapter.scrapeCategoryWithPage(page, category.path);
+        let products = await adapter.scrapeCategoryWithPage(page, category.path);
+
+        if (enrichPdp && products.length > 0) {
+          const target = enrichLimit != null ? Math.min(enrichLimit, products.length) : products.length;
+          console.log(`  Enriching ${target} product page(s) with description/brand/image/stock…`);
+          products = await enrichProductsWithPdpFields(page, products, adapter.slug, {
+            limit: enrichLimit,
+            onProgress: (i, total) => process.stdout.write(`    enrich ${i}/${total}\r`),
+          });
+          process.stdout.write("\n");
+        }
 
         if (products.length === 0) {
           console.log("  No products found — skipping upsert.");

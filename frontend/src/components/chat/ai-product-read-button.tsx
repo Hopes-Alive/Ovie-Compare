@@ -6,7 +6,8 @@ import { useCallback, useState } from "react";
 import { AiReadProgress } from "@/components/chat/ai-read-progress";
 import { Button } from "@/components/ui/button";
 import { AI_STATUS_CHECK_LABEL } from "@/lib/chat/product-check-labels";
-import type { AiReadState, ProductCardData, StockStatus } from "@/types/chat";
+import { buildProductCardUpdatesFromCheck } from "@/lib/chat/apply-product-check-result";
+import type { AiReadState, ProductCardData } from "@/types/chat";
 
 const CHAT_SESSION_KEY = "ovie-chat-session-token";
 
@@ -32,14 +33,6 @@ type AiProductReadButtonProps = {
   product: ProductCardData;
   onProductUpdate?: (productId: string, updates: Partial<ProductCardData>) => void;
 };
-
-function mapStockStatus(value: string | undefined): StockStatus | undefined {
-  if (!value) return undefined;
-  if (value === "in_stock" || value === "out_of_stock" || value === "low_stock" || value === "unknown") {
-    return value;
-  }
-  return undefined;
-}
 
 export function AiProductReadButton({ product, onProductUpdate }: AiProductReadButtonProps) {
   const [state, setState] = useState<AiReadState>({ phase: "idle" });
@@ -108,6 +101,7 @@ export function AiProductReadButton({ product, onProductUpdate }: AiProductReadB
                 result: "login_required",
                 oldPrice: event.oldPrice,
                 newPrice: event.newPrice,
+                oldStockStatus: event.oldStockStatus,
                 stockStatus: event.stockStatus ?? event.oldStockStatus,
                 changes: event.changes,
               };
@@ -117,24 +111,15 @@ export function AiProductReadButton({ product, onProductUpdate }: AiProductReadB
                 result: event.changed ? "changed" : "unchanged",
                 oldPrice: event.oldPrice,
                 newPrice: event.newPrice,
+                oldStockStatus: event.oldStockStatus,
                 stockStatus: event.stockStatus ?? event.oldStockStatus,
                 changes: event.changes,
               };
 
-              const updates: Partial<ProductCardData> = {
-                lastCheckedAgo: "just now",
-                freshness: "fresh",
-              };
-              if (event.newPrice != null && event.newPrice > 0) {
-                updates.price = event.newPrice;
-              }
-              const stock = mapStockStatus(event.stockStatus);
-              if (stock && stock !== "unknown") updates.stockStatus = stock;
-              if (event.changed) {
-                updates.priceChangeStatus = "changed";
-              }
-
-              onProductUpdate?.(product.id, updates);
+              onProductUpdate?.(
+                product.id,
+                buildProductCardUpdatesFromCheck(event),
+              );
             }
           } else if (event.type === "error" && (!event.productId || event.productId === product.id)) {
             finalState = { phase: "error", message: event.message };

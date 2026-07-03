@@ -80,16 +80,24 @@ export async function failScrapeJob(jobId: string, errorMessage: string): Promis
     .eq("id", jobId);
 }
 
-export async function hasRunningRefreshJob(supplierId: string): Promise<boolean> {
+/**
+ * True while ANY scrape job — admin/scheduled `refresh` or a one-off seed
+ * script (`category_seed`/`full_seed`/`search_seed`, e.g. `npm run seed:*`)
+ * — is running for this supplier. Seed scripts don't honour `cancel_requested`
+ * and use their own Playwright browser, so starting an admin/scheduled
+ * refresh at the same time doubles site traffic and interleaves writes to
+ * `supplier_products` — this guard keeps admin refresh from racing them.
+ */
+export async function hasActiveScrapeJob(supplierId: string): Promise<boolean> {
   const { data, error } = await supabase
     .from("scrape_jobs")
     .select("id")
     .eq("supplier_id", supplierId)
-    .eq("job_type", "refresh")
+    .in("job_type", ["refresh", "category_seed", "full_seed", "search_seed"])
     .eq("status", "running")
     .limit(1);
 
-  if (error) throw new Error(`Failed to check running jobs: ${error.message}`);
+  if (error) throw new Error(`Failed to check active scrape jobs: ${error.message}`);
   return (data?.length ?? 0) > 0;
 }
 
