@@ -339,6 +339,28 @@ async function buildHybridPool(filters: SearchFilters): Promise<{
       }),
     );
   }
+  // Stock filter can hide the exact product the user asked about (e.g. "is X in
+  // stock?" on an out-of-stock item) — widen so the Answer LLM can see the real
+  // row and report its true status instead of silently substituting a different
+  // in-stock product.
+  if (filters.stock_status) {
+    attempts.push(
+      enrichFiltersWithKeywords({
+        ...filters,
+        category: undefined,
+        subcategory: undefined,
+        stock_status: undefined,
+      }),
+    );
+  }
+  // NOTE: we deliberately do NOT add a "drop name" attempt here. This function
+  // runs once per supplier when searching across all suppliers (see
+  // `runPerSupplierHybridSearch`) — dropping `name` per-supplier would let a
+  // supplier that genuinely has zero matches fall back to ranking its *entire*
+  // catalog by embedding similarity, polluting the merged results with
+  // irrelevant "best of a bad lot" products and wildly inflating the reported
+  // total. Dropping `name` as an absolute last resort is instead handled once,
+  // globally, by the callers in `retrieveProducts` — see `rescueWithoutName`.
 
   let ftsPrimary = false;
 
@@ -554,7 +576,22 @@ async function attachVariantSiblings(rows: ProductRow[]): Promise<ProductRow[]> 
 // Cosine re-rank helpers
 // ---------------------------------------------------------------------------
 
-function rerankBalanced(rows: ProductRow[]): ProductRow[] {
+function rerankBalanced(rows: ProductRow[], sortBy: SearchFilters["sort_by"]): ProductRow[] {
+  // "cheapest"/"most expensive" queries must return the actual cheapest/priciest
+  // rows across suppliers — per-supplier balancing would silently drop the true
+  // top result in favour of supplier diversity, which is wrong for explicit
+  // price-sort intent.
+  if (sortBy === "price_asc" || sortBy === "price_desc") {
+    const sign = sortBy === "price_asc" ? 1 : -1;
+    return [...rows]
+      .sort((a, b) => {
+        const pa = a.price ?? (sortBy === "price_asc" ? Infinity : -Infinity);
+        const pb = b.price ?? (sortBy === "price_asc" ? Infinity : -Infinity);
+        return sign * (pa - pb);
+      })
+      .slice(0, RESULT_LIMIT);
+  }
+
   const scored = [...rows].sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0));
 
   const perSupplierCount: Record<string, number> = {};
@@ -643,12 +680,57 @@ async function runPerSupplierHybridSearch(filters: SearchFilters): Promise<{
 }
 
 // ---------------------------------------------------------------------------
+// Absolute last-resort rescue — drop the (possibly too-literal) `name` filter
+// ---------------------------------------------------------------------------
+
+/**
+ * Single, global attempt at FTS + vector search with `name` (and category/
+ * subcategory/stock_status) dropped entirely, relying only on the full
+ * `rewritten_query` text. Only called once nothing else found anything, so it
+ * can't pollute per-supplier results the way retrying inside `buildHybridPool`
+ * would (see note above `buildHybridPool`).
+ */
+async function rescueWithoutName(
+  filters: SearchFilters,
+  supplierIdFilter: string | null,
+): Promise<ProductRow[]> {
+  if (!filters.name) return [];
+  const widened: SearchFilters = {
+    ...filters,
+    name: undefined,
+    category: undefined,
+    subcategory: undefined,
+    stock_status: undefined,
+    // Search on the dropped `name` keyword alone, not the full rewritten_query:
+    // websearch-style FTS ANDs every word together, so conversational filler
+    // ("under", "before", "kids") in the full sentence would over-constrain
+    // the match and defeat the point of this rescue. `name` is usually the
+    // single strongest product/category term (e.g. "anaesthetic"), which is
+    // also indexed into search_vector via the `category` column.
+    rewritten_query: filters.name,
+  };
+  const ftsRows = await runFtsSearchFiltered(widened, supplierIdFilter);
+  if (ftsRows.length === 0) return [];
+  const queryVector = await embedText(filters.rewritten_query);
+  return hybridRerank(ftsRows, queryVector, ftsRows.map((r) => r.id), filters.sort_by);
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
 export async function retrieveProducts(filters: SearchFilters): Promise<SearchResult> {
   if (filters.supplier_slug) {
-    const { rows, total, ftsPrimary } = await buildHybridPool(filters);
+    let { rows, total, ftsPrimary } = await buildHybridPool(filters);
+    if (rows.length === 0) {
+      const supplierIdFilter = await resolveSupplierId(filters.supplier_slug);
+      const rescued = await rescueWithoutName(filters, supplierIdFilter);
+      if (rescued.length > 0) {
+        rows = rescued;
+        total = rescued.length;
+        ftsPrimary = true;
+      }
+    }
     const deduped = await attachVariantSiblings(rows);
     const top = deduped.slice(0, RESULT_LIMIT);
     const withAlts = await attachCanonicalAlternatives(top);
@@ -662,7 +744,14 @@ export async function retrieveProducts(filters: SearchFilters): Promise<SearchRe
     const globalFilters = enrichFiltersWithKeywords(filters);
     const ftsRows = await runFtsSearchFiltered(globalFilters, null);
     if (ftsRows.length === 0) {
-      return { rows: [], total: 0, fallback: true };
+      const rescued = await rescueWithoutName(filters, null);
+      if (rescued.length === 0) {
+        return { rows: [], total: 0, fallback: true };
+      }
+      const deduped = await attachVariantSiblings(rescued);
+      const top = deduped.slice(0, RESULT_LIMIT);
+      const withAlts = await attachCanonicalAlternatives(top);
+      return { rows: withAlts, total: top.length, fallback: true };
     }
     const queryVector = await embedText(filters.rewritten_query);
     const ranked = hybridRerank(ftsRows, queryVector, ftsRows.map((r) => r.id), filters.sort_by);
@@ -673,7 +762,7 @@ export async function retrieveProducts(filters: SearchFilters): Promise<SearchRe
   }
 
   const deduped = await attachVariantSiblings(allRows);
-  const ranked = rerankBalanced(deduped);
+  const ranked = rerankBalanced(deduped, filters.sort_by);
   const withAlts = await attachCanonicalAlternatives(ranked);
   return { rows: withAlts, total: grandTotal, fallback: ftsPrimary };
 }

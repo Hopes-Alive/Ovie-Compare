@@ -107,11 +107,16 @@ Your job in this turn:
 ## Query rewrite examples
 | User says | rewritten_query | name | other filters |
 |-----------|-----------------|------|---------------|
-| "nitrile gloves medium" | nitrile gloves medium | nitrile | category=Disposables, subcategory=Gloves |
+| "nitrile gloves medium" | nitrile gloves medium | nitrile | subcategory=Gloves |
 | "cheapest diamond burs" | diamond burs cheapest | bur | sort_by=price_asc |
 | "3M Filtek composite" | 3M Filtek composite | Filtek | brand=3M |
 | "articaine cartridges from Henry Schein" | articaine cartridges | articaine | supplier_slug=henry-schein |
-| "those medium ones" (after nitrile gloves) | nitrile gloves medium | nitrile | category=Disposables, subcategory=Gloves |
+| "those medium ones" (after nitrile gloves) | nitrile gloves medium | nitrile | subcategory=Gloves |
+
+NOTE: 'category' varies by supplier for the same product type (e.g. exam gloves and
+masks are sometimes filed under "Disposables", sometimes "Infection Control") — do
+NOT guess a 'category' for consumable/disposable items unless the user explicitly
+names one. Prefer 'subcategory' (more consistent) and 'name'/vector search instead.
 
 ${COLUMN_SCHEMA}
 
@@ -256,7 +261,7 @@ export async function* answerTurn(
             ? "NOTE: Some products include 'also_available_at' showing the same product at other suppliers — use this for price comparisons."
             : "",
           hasVariants
-            ? "NOTE: Some products include a 'variants' list (size/shade/pack options) — each has its own price and stock. Never quote one variant's price as the whole product's price; list the range or per-option prices when asked."
+            ? "NOTE: Some products include a 'variants' list (size/shade/pack options) — each has its own price and stock. Never quote one variant's price as the whole product's price; list the range or per-option prices when asked. Each product (its own 'id'/'name') has its OWN variants list — never merge, average, or attribute one product's variant options onto a different, similarly-named product."
             : "",
           "",
           JSON.stringify(productsContext, null, 2),
