@@ -10,6 +10,8 @@ export interface ProductListing {
   imageSrc?: string; // comma-separated image URLs
   category?: string;
   subcategory?: string;
+  /** Option label (e.g. "Extra Small") when this row was expanded from a configurable product's variant table. */
+  variantLabel?: string;
 }
 
 export interface ProductDetail extends ProductListing {

@@ -10,7 +10,7 @@
  */
 import { supabase } from "../../lib/supabase.js";
 import { embedText } from "./llm-client.js";
-import type { SearchFilters, SearchResult, ProductRow } from "./types.js";
+import type { SearchFilters, SearchResult, ProductRow, VariantOption } from "./types.js";
 
 const FILTER_POOL_LIMIT = 80; // max rows to fetch before hybrid re-ranking
 const RESULT_LIMIT = 5;
@@ -53,6 +53,7 @@ const PRODUCT_SELECT = `
   description,
   image_src,
   pack_size,
+  variant_label,
   unit_of_measure,
   price,
   currency,
@@ -66,6 +67,7 @@ const PRODUCT_SELECT = `
   created_at,
   supplier_product_url,
   embedding,
+  metadata,
   suppliers!inner ( slug, name )
 `.trim();
 
@@ -107,6 +109,7 @@ function toProductRow(raw: Record<string, unknown>): ProductRow & { _embedding: 
     description: (raw.description as string) ?? null,
     image_src: (raw.image_src as string) ?? null,
     pack_size: (raw.pack_size as string) ?? null,
+    variant_label: (raw.variant_label as string) ?? null,
     unit_of_measure: (raw.unit_of_measure as string) ?? null,
     price: (raw.price as number) ?? null,
     currency: (raw.currency as string) ?? "AUD",
@@ -119,6 +122,7 @@ function toProductRow(raw: Record<string, unknown>): ProductRow & { _embedding: 
     last_changed_at: (raw.last_changed_at as string) ?? null,
     created_at: (raw.created_at as string) ?? null,
     supplier_product_url: (raw.supplier_product_url as string) ?? null,
+    login_required: Boolean((raw.metadata as Record<string, unknown> | null)?.login_required),
     _embedding: parseEmbedding(raw.embedding),
   };
 }
@@ -476,6 +480,77 @@ async function attachCanonicalAlternatives(rows: ProductRow[]): Promise<ProductR
 }
 
 // ---------------------------------------------------------------------------
+// Variant grouping — collapse sibling size/shade/pack rows into one card
+// ---------------------------------------------------------------------------
+
+function variantFamilyKey(row: ProductRow): string {
+  return `${row.supplier_id}::${row.name}`;
+}
+
+/**
+ * Configurable products (e.g. gloves in XS–XL) are stored as one DB row per
+ * variant, all sharing the same `(supplier_id, name)` — a search can easily
+ * rank several siblings into the same result pool. Collapse them into a
+ * single representative row (the best-ranked one) and attach the **full**
+ * sibling set (fetched fresh, not just whatever happened to rank) as
+ * `variants`, so the UI can offer a size/shade dropdown instead of showing
+ * near-duplicate cards. Rows without a `variant_label` pass through untouched.
+ */
+async function attachVariantSiblings(rows: ProductRow[]): Promise<ProductRow[]> {
+  const variantRows = rows.filter((r) => r.variant_label != null);
+  if (variantRows.length === 0) return rows;
+
+  // Pick the best-ranked row per family as the representative, regardless of
+  // input order — callers may pass an unsorted pool (e.g. before `rerankBalanced`).
+  const bestByFamily = new Map<string, ProductRow>();
+  for (const row of variantRows) {
+    const key = variantFamilyKey(row);
+    const current = bestByFamily.get(key);
+    if (!current || (row.similarity ?? 0) > (current.similarity ?? 0)) {
+      bestByFamily.set(key, row);
+    }
+  }
+  const representativeIds = new Set([...bestByFamily.values()].map((r) => r.id));
+
+  const siblingsByFamily = new Map<string, VariantOption[]>();
+  await Promise.all(
+    [...bestByFamily.entries()].map(async ([key, rep]) => {
+      const { data } = await (supabase as AnyQuery)
+        .from("supplier_products")
+        .select("id, external_sku, variant_label, price, stock_status, supplier_product_url")
+        .eq("supplier_id", rep.supplier_id)
+        .eq("name", rep.name)
+        .eq("is_active", true)
+        .not("variant_label", "is", null);
+
+      const options: VariantOption[] = ((data ?? []) as Array<Record<string, unknown>>)
+        .map((row) => ({
+          id: row.id as string,
+          sku: (row.external_sku as string) ?? null,
+          label: (row.variant_label as string) ?? null,
+          price: (row.price as number) ?? null,
+          stock_status: (row.stock_status as string) ?? "unknown",
+          url: (row.supplier_product_url as string) ?? null,
+        }))
+        .sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
+
+      siblingsByFamily.set(key, options);
+    }),
+  );
+
+  const result: ProductRow[] = [];
+  for (const row of rows) {
+    if (row.variant_label == null) {
+      result.push(row);
+      continue;
+    }
+    if (!representativeIds.has(row.id)) continue; // a better-ranked sibling represents this family
+    result.push({ ...row, variants: siblingsByFamily.get(variantFamilyKey(row)) ?? [] });
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Cosine re-rank helpers
 // ---------------------------------------------------------------------------
 
@@ -574,7 +649,8 @@ async function runPerSupplierHybridSearch(filters: SearchFilters): Promise<{
 export async function retrieveProducts(filters: SearchFilters): Promise<SearchResult> {
   if (filters.supplier_slug) {
     const { rows, total, ftsPrimary } = await buildHybridPool(filters);
-    const top = rows.slice(0, RESULT_LIMIT);
+    const deduped = await attachVariantSiblings(rows);
+    const top = deduped.slice(0, RESULT_LIMIT);
     const withAlts = await attachCanonicalAlternatives(top);
     return { rows: withAlts, total, fallback: ftsPrimary };
   }
@@ -589,17 +665,15 @@ export async function retrieveProducts(filters: SearchFilters): Promise<SearchRe
       return { rows: [], total: 0, fallback: true };
     }
     const queryVector = await embedText(filters.rewritten_query);
-    const ranked = hybridRerank(
-      ftsRows,
-      queryVector,
-      ftsRows.map((r) => r.id),
-      filters.sort_by,
-    ).slice(0, RESULT_LIMIT);
-    const withAlts = await attachCanonicalAlternatives(ranked);
-    return { rows: withAlts, total: ranked.length, fallback: true };
+    const ranked = hybridRerank(ftsRows, queryVector, ftsRows.map((r) => r.id), filters.sort_by);
+    const deduped = await attachVariantSiblings(ranked);
+    const top = deduped.slice(0, RESULT_LIMIT);
+    const withAlts = await attachCanonicalAlternatives(top);
+    return { rows: withAlts, total: top.length, fallback: true };
   }
 
-  const ranked = rerankBalanced(allRows);
+  const deduped = await attachVariantSiblings(allRows);
+  const ranked = rerankBalanced(deduped);
   const withAlts = await attachCanonicalAlternatives(ranked);
   return { rows: withAlts, total: grandTotal, fallback: ftsPrimary };
 }

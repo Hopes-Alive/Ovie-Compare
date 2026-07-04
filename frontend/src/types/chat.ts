@@ -11,11 +11,22 @@ export type ProductAlternative = {
   name: string;
 };
 
+/** One size/shade/pack option of a configurable product. */
+export type ProductVariantOption = {
+  id: string;
+  sku?: string | null;
+  label: string | null;
+  price: number | null;
+  stockStatus: StockStatus;
+  url?: string | null;
+};
+
 export type ProductCardData = {
   id: string;
   supplier: string;
   supplier_slug?: string;
   name: string;
+  description?: string;
   price: number;
   currency: string;
   stockStatus: StockStatus;
@@ -32,8 +43,12 @@ export type ProductCardData = {
   imageUrl?: string;
   imageUrls?: string[];
   url?: string;
+  /** True when the supplier site currently gates this product's price behind a login wall */
+  loginRequired?: boolean;
   /** Same product at other suppliers (from canonical matching) */
   alternatives?: ProductAlternative[];
+  /** Size/shade/pack options of this configurable product — lets the UI switch price/stock/url */
+  variants?: ProductVariantOption[];
 };
 
 export type ChatMessageRole = "user" | "assistant";

@@ -158,6 +158,24 @@ final_score = w1 * structured_rank + w2 * fts_rank + w3 * vector_rank
 - vague product names → boost vector + FTS
 - exact SKU-like tokens → boost FTS + trigram
 
+### Variant grouping (configurable products)
+
+Configurable products (size/shade/pack variants — see `scraping.md` § "Product
+variants") are stored as one `supplier_products` row per variant, all sharing
+`(supplier_id, name)` with a non-null `variant_label`. `attachVariantSiblings()`
+runs after each of the three retrieval paths above, before the result limit is
+applied:
+
+1. Find rows in the current result set with a non-null `variant_label`.
+2. Group by `(supplier_id, name)`, fetch **every** sibling row for that family
+   (not just the ones that happened to rank in this search).
+3. Attach them as `variants: VariantOption[]` on the single highest-ranked row.
+4. Drop the other sibling rows from the result list.
+
+So a search can match 13 shade variants of the same product but the caller only
+ever sees **one** `ProductRow`/`ProductCardData` with a `variants` array —
+never 13 near-duplicate cards for the same physical product.
+
 ### Progressive fallback if few results
 
 1. Drop optional filters (brand, maxPrice)
@@ -206,8 +224,13 @@ Follow-ups like "check live price for the first one" resolve to IDs — no re-se
 3. Comparison questions → mention multiple suppliers.
 4. Warn if pack sizes differ ("verify pack count").
 5. If data stale (>24h), suggest live check.
-6. Never invent prices or stock.
+6. Never invent prices or stock. When `price` is `null` and `login_required`
+   is `true` on the row, say the price requires supplier login — do not
+   repeat a stale/previous number.
 7. Return structured `products` array for UI cards.
+8. When a row has `variants` (configurable product — see "Variant grouping"
+   above), list per-option prices/stock if asked for detail — **never average
+   or quote a single price** for a product that has multiple variants.
 
 ---
 

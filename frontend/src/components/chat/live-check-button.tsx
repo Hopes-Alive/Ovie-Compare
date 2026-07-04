@@ -24,6 +24,14 @@ type LiveCheckSseEvent =
       fieldsChanged?: string[];
       changes?: { label: string; from: string; to: string }[];
       loginRequired?: boolean;
+      variants?: {
+        id: string;
+        sku: string | null;
+        label: string | null;
+        price: number | null;
+        stockStatus: string;
+        url: string | null;
+      }[];
     }
   | { type: "error"; message: string; productId?: string }
   | { type: "done"; summary: { changed: number; unchanged: number; failed: number } };

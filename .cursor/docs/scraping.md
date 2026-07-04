@@ -32,7 +32,14 @@ How we ingest and refresh product data from Henry Schein and Adam Dental.
 ### Henry Schein
 
 - Search: `https://www.henryschein.com.au/search?searchTerm={query}`
-- Public prices on search (verified)
+- Public prices on search (verified) — but **not guaranteed on every PDP**:
+  some product pages (seen on equipment/accessories, e.g. 3D printing) render
+  a "Login to buy" CTA instead of a price for anonymous visitors, while
+  `window.products.PriceForOneInc`/`PriceForOneEx` in the page's JS state
+  still carries a real-looking numeric string (e.g. `"$231.00"`). The
+  structured JSON does **not** reliably signal this the way it does for
+  `"Call us!"` values — only the rendered DOM does. See "Login wall via DOM"
+  below.
 - Platform: enterprise e-commerce (SAP-style)
 
 ### Adam Dental
@@ -179,6 +186,15 @@ Rules that protect active chat:
 - `metadata` is **merged**, not replaced.
 - Products missing from a category crawl are **not** deactivated or deleted.
 - `price_history` only **appends** rows when price changes.
+- **Exception — confirmed login wall:** a missing price from a flaky/partial
+  parse never clears the existing price (see rule above). But when the parser
+  *positively* detects a login wall (`raw.login_required = true` — e.g. "Login
+  to buy" / "Call us!" text, not just an absent field), the old price **is**
+  cleared to `null` and a `price_history` row is appended (`new_price: null`).
+  Otherwise a product that permanently becomes login-gated would keep serving
+  a stale, un-groundable price to chat forever. `metadata.login_required` is
+  also selected by chat retrieval so the answer LLM can say "requires supplier
+  login" instead of inventing/repeating a number.
 
 Manual run:
 
@@ -205,11 +221,14 @@ Stricter than bulk scrape:
 ```
 1. Validate productIds belong to active suppliers
 2. Validate URLs match approved_domains
-3. Playwright open URL (timeout 60s)
-4. parseProductPage
-5. Compare with DB row
-6. Update DB + price_history
-7. Return { old, new, changed } to client via SSE
+3. If row isn't already a split variant, try variant discovery first
+   (see "On-the-fly discovery during live check / AI read" below) —
+   short-circuits the rest of this list on success
+4. Playwright open URL (timeout 60s)
+5. parseProductPage
+6. Compare with DB row
+7. Update DB + price_history
+8. Return { old, new, changed } to client via SSE
 ```
 
 **Never** accept arbitrary URLs from LLM or user — only DB-stored product URLs.
@@ -236,7 +255,121 @@ fills gaps the `window.products` / `data-product-data` parse can't see:
     `externalSku`, or when exactly one badge exists on the page. Otherwise
     the result stays `unknown` — **never guess** a sibling variant's stock.
 - Merge is additive only: it never overwrites a value the structured parser
-  already found.
+  already found — **except price**: `extractPdpDomFields` also scans short
+  leaf-text elements for a "Login to buy" / "Call for price" CTA
+  (`loginToBuyDetected`). When present, `mergeDomFields` **always** strips
+  `price`/`priceExGst` and forces `raw.login_required = true`, even if
+  `window.products` contained a number — the DOM is ground truth for what an
+  anonymous visitor actually sees, and enterprise SAP Commerce PDPs have been
+  observed leaving a real numeric price in the JS state while the template
+  hides it behind this CTA. The same DOM signal (`snapshot.loginHint`) also
+  overrides a "valid" structured price in the AI-read validation step
+  (`validate-extraction.ts`).
+
+---
+
+## Product variants (configurable products)
+
+Some PDPs (e.g. Adam Dental's Saniflex gloves, Coltene composite caps) render a
+**variant options table** — one `.data-list-item` row per SKU (size/shade/pack),
+each with its own price and stock badge, instead of one price for the whole page.
+These are stored as **one `supplier_products` row per variant**, not one row for
+the whole configurable product:
+
+```
+supplier_products
+  id            (unique per variant)
+  external_id / sku   (variant-specific SKU)
+  supplier_product_url  base PDP URL + `?ProductCode={sku}` (see below)
+  variant_label text    e.g. "Small", "A2/B2" — NULL for ordinary single-SKU products
+  price, stock_status   per-variant values
+```
+
+### Extraction (`extractPdpDomFields`)
+
+`extractPdpDomFields()` (`backend/src/lib/extract-pdp-dom-fields.ts`) walks every
+non-heading `.data-list-item` row on the PDP and returns `variantRows: VariantRow[]`
+(sku, optionLabel, price, availability) alongside the existing single-product DOM
+fields. `cleanVariantPriceText` rejects non-numeric cells ("Call us!") so those rows
+correctly parse to `price: null` rather than `0`/`NaN`.
+
+### Giving each variant a unique URL
+
+Because the DB uniqueness constraint is `(supplier_id, supplier_product_url)` /
+`(supplier_id, external_id)`, every variant needs its own URL even though they
+share one physical PDP. `withProductCodeParam()`
+(`backend/src/scrapers/parse-product-helpers.ts`) appends `?ProductCode={sku}` to
+the shared PDP URL — the same convention Henry Schein already used as a
+category-fallback product URL. `extractProductCodeFromUrl()` reverses this to
+recover the `skuHint` when re-visiting a specific variant's URL (Pass B, live
+check, AI read). **This is a legitimate direct-product-page URL for any
+supplier** — `isBadProductUrl()` (`backend/src/services/live-check/validate-products.ts`)
+must not block `?ProductCode=` in general, only real `/search?` listing pages.
+
+### Where variants are discovered/expanded
+
+- **`expandProductVariants(detail, domFields)`** (`parse-product-helpers.ts`) —
+  given a parsed parent `ProductDetail` and the PDP's `variantRows`, returns one
+  synthetic `ProductDetail` per variant (unique URL/SKU/label/price/stock). Used
+  by:
+  - **`enrichProductsWithPdpFields`** (`enrich-listing-products.ts`) — the
+    opt-in PDP-visit enrichment step during bulk scrape/seed. This is the
+    primary place new variants get discovered: visiting a listing's PDP once
+    can turn 1 input product into N output rows.
+  - **`repair-variant-parents.ts`** (one-off backfill script) — re-visits
+    existing `is_active` rows with `variant_label IS NULL`; if the PDP now
+    shows >1 variant row, expands them and marks the old parent row
+    `is_active = false` with `metadata.superseded_by_variants = true`.
+- **`buildVariantMatch(pageProducts, domFields, skuHint)`** (`parse-product-helpers.ts`)
+  — for Pass B / live check / AI read, where the request targets one specific
+  variant SKU that isn't itself a key in `window.products` (only the parent
+  SKU is). Builds a one-off `ProductDetail` for that SKU by combining the
+  parent product's shared fields (name, description, image) with that variant
+  row's price/stock/label from `domFields.variantRows`. Wired into both
+  adapters' `parseProductPage` as the fallback when `pickProductMatch` returns
+  no match for the hinted SKU.
+
+### On-the-fly discovery during live check / AI read
+
+The bulk scrape's PDP enrichment (`enrichProductsWithPdpFields`) is opt-in, so
+most products are still stored as an un-expanded single row
+(`variant_label IS NULL`) even when their PDP has a variant table. Rather than
+only fixing this via the `repair-variant-parents.ts` backfill, **live check**
+and **AI product read** both call `discoverAndExpandVariants()`
+(`backend/src/services/live-check/expand-variants.ts`) for any checked row
+that isn't already a split variant:
+
+1. Re-visit the row's PDP and read `extractPdpDomFields().variantRows`.
+2. If there's only 0–1 rows, fall through to the normal single-product
+   parse/upsert flow (adapter `parseProductPage` or the AI snapshot/LLM path)
+   — unchanged behaviour for ordinary products.
+3. If there are 2+ rows, expand via `expandProductVariants`, `upsertProducts`
+   the new rows, and retire the original parent row (`is_active: false`,
+   `metadata.superseded_by_variants: true`) — same pattern as the backfill
+   script.
+4. The SSE `result` event carries the new `variants[]` (with real DB ids) and
+   a `representativeProductId`, so the already-open chat card can switch into
+   dropdown mode immediately — no re-search or page reload needed.
+
+This adds one extra PDP navigation to every check of an un-expanded row
+(a few seconds), which is an accepted cost for a user-triggered, single-item
+action. Rows that are already a split variant (`variant_label` set) skip this
+step entirely.
+
+### Retrieval: grouping siblings back into one card
+
+`attachVariantSiblings()` (`backend/src/services/brain/retrieval.ts`) runs after
+each retrieval path (structured/FTS/vector) and before the result limit is
+applied: it groups rows sharing `(supplier_id, name)` with a non-null
+`variant_label`, fetches **all** sibling rows for that family, attaches them as
+a `variants[]` array on the single highest-ranked row, and drops the rest from
+the result list — so chat shows **one card per configurable product**, not one
+per SKU. The LLM prompt (`brain-conversation.ts`) receives the full `variants`
+list (option/price/stock per variant) and is told never to average variant
+prices — always answer per-option. The frontend product card
+(`frontend/src/components/chat/product-card.tsx`) renders these as a
+size/shade `<Select>` dropdown; choosing an option swaps the card's displayed
+price/stock/URL and which row Live Check / AI Read act on.
 
 ---
 
@@ -281,6 +414,7 @@ Scheduler: `refresh-scheduler.ts` (no Redis required for MVP). BullMQ optional f
 | Timeout | Retry 2x with backoff, then mark failed |
 | Parse failure | Save `raw_snapshot` + error, alert in admin jobs |
 | Login wall detected | `metadata.login_required = true`, skip price update |
+| Login wall via DOM (see below) | `extractPdpDomFields` price/`login_required` override wins over structured JSON |
 | Rate limit / 403 | Pause supplier queue, alert admin |
 
 ---

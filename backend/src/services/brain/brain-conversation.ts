@@ -214,13 +214,28 @@ export async function* answerTurn(
     brand: r.brand,
     category: r.category,
     supplier: r.supplier_name,
-    price: r.price != null ? `${r.price} AUD` : "price not available",
+    price:
+      r.price != null
+        ? `${r.price} AUD`
+        : r.login_required
+          ? "price requires supplier login (not publicly listed) — do not guess a price"
+          : "price not available",
     stock_status: r.stock_status,
     pack_size: r.pack_size,
     description: r.description?.slice(0, 200) || null,
     delivery: r.delivery_text,
     last_checked: r.last_checked_at,
     url: r.supplier_product_url,
+    // Configurable product (size/shade/pack) — list every option instead of
+    // quoting a single variant's price for the whole product.
+    variants:
+      r.variants && r.variants.length > 1
+        ? r.variants.map((v) => ({
+            option: v.label,
+            price: v.price != null ? `${v.price} AUD` : "price not available",
+            stock_status: v.stock_status,
+          }))
+        : undefined,
     // Cross-supplier price comparison — same canonical product at other suppliers
     also_available_at: r.canonical_alternatives?.map((alt) => ({
       supplier: getSupplierDisplayName(alt.supplier_slug, alt.supplier_name),
@@ -230,6 +245,7 @@ export async function* answerTurn(
   }));
 
   const hasCanonicalMatches = rows.some((r) => r.canonical_alternatives && r.canonical_alternatives.length > 0);
+  const hasVariants = rows.some((r) => r.variants && r.variants.length > 1);
   const contextBlock =
     rows.length === 0
       ? "No products found."
@@ -238,6 +254,9 @@ export async function* answerTurn(
           `Found ${total} total matching products. Showing top ${rows.length}:`,
           hasCanonicalMatches
             ? "NOTE: Some products include 'also_available_at' showing the same product at other suppliers — use this for price comparisons."
+            : "",
+          hasVariants
+            ? "NOTE: Some products include a 'variants' list (size/shade/pack options) — each has its own price and stock. Never quote one variant's price as the whole product's price; list the range or per-option prices when asked."
             : "",
           "",
           JSON.stringify(productsContext, null, 2),
@@ -285,6 +304,7 @@ export async function* answerTurn(
       supplier: getSupplierDisplayName(r.supplier_slug, r.supplier_name),
       supplier_slug: r.supplier_slug,
       name: r.name,
+      description: r.description ?? undefined,
       price: r.price ?? 0,
       currency: r.currency ?? "AUD",
       stockStatus: (r.stock_status ?? "unknown") as ProductCardData["stockStatus"],
@@ -301,6 +321,15 @@ export async function* answerTurn(
       imageUrl: imageUrls[0],
       imageUrls,
       url: r.supplier_product_url || undefined,
+      loginRequired: r.login_required,
+      variants: r.variants?.map((v) => ({
+        id: v.id,
+        sku: v.sku,
+        label: v.label,
+        price: v.price,
+        stockStatus: (v.stock_status ?? "unknown") as ProductCardData["stockStatus"],
+        url: v.url,
+      })),
       alternatives: r.canonical_alternatives?.map((alt) => ({
         supplier: getSupplierDisplayName(alt.supplier_slug, alt.supplier_name),
         supplier_slug: alt.supplier_slug,

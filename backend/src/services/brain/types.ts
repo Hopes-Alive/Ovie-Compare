@@ -41,6 +41,16 @@ export interface CanonicalAlternative {
   supplier_name: string;
 }
 
+/** One size/shade/pack option of a configurable product (same name, sibling DB rows) */
+export interface VariantOption {
+  id: string;
+  sku: string | null;
+  label: string | null;
+  price: number | null;
+  stock_status: string;
+  url: string | null;
+}
+
 /** A single product row from supplier_products joined with suppliers */
 export interface ProductRow {
   id: string;
@@ -56,6 +66,7 @@ export interface ProductRow {
   description: string | null;
   image_src: string | null;
   pack_size: string | null;
+  variant_label: string | null;
   unit_of_measure: string | null;
   price: number | null;
   currency: string;
@@ -69,8 +80,12 @@ export interface ProductRow {
   created_at: string | null;
   supplier_product_url: string | null;
   similarity?: number;
+  /** True when the supplier site currently gates this product's price behind a login wall */
+  login_required: boolean;
   /** Products from other suppliers that share the same canonical product identity */
   canonical_alternatives?: CanonicalAlternative[];
+  /** Sibling size/shade/pack options of the same configurable product (this row is one of them) */
+  variants?: VariantOption[];
 }
 
 /** Result from the retrieval step */
@@ -86,6 +101,7 @@ export interface ProductCardData {
   supplier: string;
   supplier_slug?: string;
   name: string;
+  description?: string;
   price: number;
   currency: string;
   stockStatus: "in_stock" | "out_of_stock" | "low_stock" | "unknown";
@@ -102,6 +118,8 @@ export interface ProductCardData {
   imageUrl?: string;
   imageUrls?: string[];
   url?: string;
+  /** True when the supplier site currently gates this product's price behind a login wall */
+  loginRequired?: boolean;
   /** Same product available at other suppliers — enables inline price comparison */
   alternatives?: Array<{
     supplier: string;
@@ -110,6 +128,15 @@ export interface ProductCardData {
     currency: string;
     url: string | null;
     name: string;
+  }>;
+  /** Size/shade/pack options of this configurable product — lets the UI switch price/stock/url */
+  variants?: Array<{
+    id: string;
+    sku: string | null;
+    label: string | null;
+    price: number | null;
+    stockStatus: "in_stock" | "out_of_stock" | "low_stock" | "unknown";
+    url: string | null;
   }>;
 }
 

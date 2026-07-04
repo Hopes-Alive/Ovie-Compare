@@ -4,6 +4,18 @@ export type ProductFieldChange = {
   to: string;
 };
 
+/** One size/shade/pack option discovered by expanding a configurable product's
+ * variant table during a live check / AI read — mirrors the frontend's
+ * `ProductVariantOption` shape so it can be applied to the card as-is. */
+export type DiscoveredVariantOption = {
+  id: string;
+  sku: string | null;
+  label: string | null;
+  price: number | null;
+  stockStatus: string;
+  url: string | null;
+};
+
 export type LiveCheckSseEvent =
   | { type: "progress"; supplier: string; index: number; total: number }
   | {
@@ -18,6 +30,13 @@ export type LiveCheckSseEvent =
       changes?: ProductFieldChange[];
       loginRequired?: boolean;
       aiNotes?: string;
+      /** Present when the check discovered a variant table on the PDP that
+       * wasn't captured by the original scrape — the checked row was expanded
+       * into one row per option and the old row retired. */
+      variants?: DiscoveredVariantOption[];
+      /** Which of `variants` best matches the originally-checked SKU — the
+       * card should default its dropdown/price/stock display to this one. */
+      representativeProductId?: string;
     }
   | { type: "error"; message: string; productId?: string }
   | {
@@ -57,6 +76,8 @@ export type LiveCheckProductRow = {
   delivery_text: string | null;
   delivery_min_days: number | null;
   delivery_max_days: number | null;
+  variant_label: string | null;
+  metadata: Record<string, unknown> | null;
   supplier_id: string;
   suppliers: {
     id: string;

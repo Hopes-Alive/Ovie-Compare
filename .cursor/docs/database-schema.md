@@ -71,6 +71,7 @@ One row per product per supplier. Main table for search and chat.
 | description | text | |
 | image_src | text | Comma-separated image URLs; first is primary |
 | pack_size | text | e.g. "100 pack" |
+| variant_label | text | nullable; option label (e.g. "Extra Small") for a row expanded from a configurable product's variant table — see `scraping.md` § Variant products |
 | unit_of_measure | text | |
 | price | numeric(12,2) | |
 | currency | text | AUD |

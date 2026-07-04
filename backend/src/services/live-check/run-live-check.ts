@@ -6,6 +6,7 @@ import { getAdapter } from "../../scrapers/registry.js";
 import { upsertProducts } from "../scrape/upsert-products.js";
 import { hasFieldChanges, mapActionChanges } from "./change-summary.js";
 import { launchBrowserForSlug, groupBySupplier } from "./browser-utils.js";
+import { discoverAndExpandVariants, isVariantExpansionCandidate } from "./expand-variants.js";
 import { finishLiveCheckJob } from "./finish-job.js";
 import { loadProducts } from "./load-products.js";
 import { validateProducts } from "./validate-products.js";
@@ -97,6 +98,58 @@ export async function* runLiveCheck(
         const url = row.supplier_product_url;
 
         try {
+          if (isVariantExpansionCandidate(row)) {
+            const expansion = await discoverAndExpandVariants({
+              page,
+              row,
+              supplierSlug: slug,
+              adapter,
+              jobId,
+              priceHistorySource: "live_check",
+            }).catch(() => ({ expanded: false as const }));
+
+            if (expansion.expanded) {
+              const rep =
+                expansion.variants.find((v) => v.id === expansion.representativeProductId) ??
+                expansion.variants[0]!;
+
+              await supabase.from("live_check_job_items").insert({
+                live_check_job_id: jobId,
+                supplier_product_id: row.id,
+                status: "success",
+                old_price: oldPrice,
+                new_price: rep.price,
+                old_stock_status: oldStock,
+                new_stock_status: rep.stockStatus,
+                changed: true,
+                duration_ms: Date.now() - startMs,
+                checked_at: new Date().toISOString(),
+              });
+
+              summary.changed++;
+              yield {
+                type: "result",
+                productId: row.id,
+                changed: true,
+                oldPrice,
+                newPrice: rep.price,
+                oldStockStatus: oldStock,
+                stockStatus: rep.stockStatus,
+                fieldsChanged: ["Variants"],
+                changes: [
+                  {
+                    label: "Variants",
+                    from: "1 option",
+                    to: `${expansion.variants.length} options found`,
+                  },
+                ],
+                variants: expansion.variants,
+                representativeProductId: expansion.representativeProductId,
+              };
+              continue;
+            }
+          }
+
           const parsed = await adapter.parseProductPage(page, url, {
             externalSku: row.external_sku,
           });

@@ -6,6 +6,10 @@ import { getAdapter } from "../../scrapers/registry.js";
 import { upsertProducts } from "../scrape/upsert-products.js";
 import { launchBrowserForSlug, groupBySupplier } from "../live-check/browser-utils.js";
 import { hasFieldChanges, mapActionChanges } from "../live-check/change-summary.js";
+import {
+  discoverAndExpandVariants,
+  isVariantExpansionCandidate,
+} from "../live-check/expand-variants.js";
 import { finishLiveCheckJob } from "../live-check/finish-job.js";
 import { loadProducts } from "../live-check/load-products.js";
 import { validateProducts } from "../live-check/validate-products.js";
@@ -101,6 +105,59 @@ export async function* runAiProductRead(
         const url = row.supplier_product_url;
 
         try {
+          if (isVariantExpansionCandidate(row)) {
+            const expansion = await discoverAndExpandVariants({
+              page,
+              row,
+              supplierSlug: row.suppliers.slug,
+              adapter,
+              jobId,
+              priceHistorySource: "ai_read",
+            }).catch(() => ({ expanded: false as const }));
+
+            if (expansion.expanded) {
+              const rep =
+                expansion.variants.find((v) => v.id === expansion.representativeProductId) ??
+                expansion.variants[0]!;
+
+              await supabase.from("live_check_job_items").insert({
+                live_check_job_id: jobId,
+                supplier_product_id: row.id,
+                status: "success",
+                old_price: oldPrice,
+                new_price: rep.price,
+                old_stock_status: oldStock,
+                new_stock_status: rep.stockStatus,
+                changed: true,
+                duration_ms: Date.now() - startMs,
+                checked_at: new Date().toISOString(),
+              });
+
+              summary.changed++;
+              yield {
+                type: "result",
+                productId: row.id,
+                changed: true,
+                oldPrice,
+                newPrice: rep.price,
+                oldStockStatus: oldStock,
+                stockStatus: rep.stockStatus,
+                fieldsChanged: ["Variants"],
+                changes: [
+                  {
+                    label: "Variants",
+                    from: "1 option",
+                    to: `${expansion.variants.length} options found`,
+                  },
+                ],
+                variants: expansion.variants,
+                representativeProductId: expansion.representativeProductId,
+                aiNotes: `Found a size/shade options table on the product page — expanded into ${expansion.variants.length} variants.`,
+              };
+              continue;
+            }
+          }
+
           const snapshot = await captureSnapshotForProductRead(page, row);
           const extraction = canUseParserFastPath(snapshot)
             ? extractionFromSnapshot(snapshot)

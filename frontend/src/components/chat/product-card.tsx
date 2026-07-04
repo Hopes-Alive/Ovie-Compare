@@ -10,6 +10,13 @@ import { AiProductReadButton } from "@/components/chat/ai-product-read-button";
 import { ProductAlternativeComparison } from "@/components/chat/product-alternative-comparison";
 import { ProductImageCarousel } from "@/components/chat/product-image-carousel";
 import { SupplierBadge } from "@/components/chat/supplier-badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { getSupplierDisplayName } from "@/lib/suppliers/display-name";
 import { getSupplierTheme } from "@/lib/suppliers/supplier-theme";
 import { cn } from "@/lib/utils";
@@ -88,9 +95,63 @@ export function ProductCard({
   const isCompact = density === "compact";
   const [altsOpen, setAltsOpen] = useState(false);
 
+  const variantOptions = product.variants && product.variants.length > 1 ? product.variants : null;
+  const [selectedVariantId, setSelectedVariantId] = useState(product.id);
+  const activeVariant =
+    variantOptions?.find((v) => v.id === selectedVariantId) ?? variantOptions?.[0] ?? null;
+
+  // Everything below reads `displayed` instead of `product` directly, so
+  // switching the size/shade dropdown updates price, stock, the "View" link,
+  // and which DB row Live Check / AI Read act on — without touching the
+  // product's own name/description/image (shared across all its variants).
+  const displayed: ProductCardData = activeVariant
+    ? {
+        ...product,
+        id: activeVariant.id,
+        price: activeVariant.price ?? 0,
+        stockStatus: activeVariant.stockStatus,
+        url: activeVariant.url ?? product.url,
+      }
+    : product;
+
   const priceDisplay =
-    product.price > 0 ? `$${product.price.toFixed(2)}` : "Price N/A";
+    displayed.price > 0
+      ? `$${displayed.price.toFixed(2)}`
+      : product.loginRequired
+        ? "Login to buy"
+        : "Price N/A";
   const metadataLines = productMetadataLines(product);
+
+  const variantSelect = variantOptions && (
+    <Select
+      value={activeVariant?.id ?? undefined}
+      onValueChange={(value) => {
+        if (value) setSelectedVariantId(value);
+      }}
+    >
+      <SelectTrigger
+        size="sm"
+        aria-label="Select size/option"
+        className={cn(isCompact ? "h-6 text-[11px]" : "h-7 text-xs")}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <SelectValue placeholder="Select option">
+          {() => {
+            const opt = variantOptions.find((v) => v.id === activeVariant?.id) ?? variantOptions[0];
+            return opt ? (opt.label ?? opt.sku ?? opt.id) : "Select option";
+          }}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        {variantOptions.map((v) => (
+          <SelectItem key={v.id} value={v.id}>
+            {v.label ?? v.sku ?? v.id}
+            {v.price != null && v.price > 0 ? ` — $${v.price.toFixed(2)}` : ""}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
 
   if (isCompact) {
     return (
@@ -125,13 +186,14 @@ export function ProductCard({
               <span
                 className={cn(
                   "inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
-                  stockClass(product.stockStatus)
+                  stockClass(displayed.stockStatus)
                 )}
               >
-                {stockLabel(product.stockStatus)}
+                {stockLabel(displayed.stockStatus)}
               </span>
               <FreshnessBadge freshness={product.freshness} className="text-[9px]" />
             </div>
+            {variantSelect && <div className="mt-1.5">{variantSelect}</div>}
           </div>
 
           <div className="flex shrink-0 flex-col items-end gap-1.5">
@@ -143,9 +205,9 @@ export function ProductCard({
             >
               {priceDisplay}
             </span>
-            {product.url && (
+            {displayed.url && (
               <a
-                href={product.url}
+                href={displayed.url}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={cn(
@@ -207,13 +269,26 @@ export function ProductCard({
             <span
               className={cn(
                 "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
-                stockClass(product.stockStatus)
+                stockClass(displayed.stockStatus)
               )}
             >
-              {stockLabel(product.stockStatus)}
+              {stockLabel(displayed.stockStatus)}
             </span>
             <FreshnessBadge freshness={product.freshness} className="text-[10px]" />
           </div>
+
+          {variantSelect && (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-medium text-muted-foreground">Size</span>
+              {variantSelect}
+            </div>
+          )}
+
+          {product.description && (
+            <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+              {product.description}
+            </p>
+          )}
 
           {product.deliveryText && (
             <p className="text-xs leading-relaxed text-muted-foreground">{product.deliveryText}</p>
@@ -231,7 +306,7 @@ export function ProductCard({
               >
                 {priceDisplay}
               </span>
-              {product.price > 0 && (
+              {displayed.price > 0 && (
                 <span className="ml-1.5 text-xs font-medium text-muted-foreground">
                   {product.currency}
                 </span>
@@ -244,9 +319,9 @@ export function ProductCard({
                 ))}
               </div>
             </div>
-            {product.url && (
+            {displayed.url && (
               <a
-                href={product.url}
+                href={displayed.url}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={cn(
@@ -307,8 +382,8 @@ export function ProductCard({
         )}
       >
         <div className="grid gap-3 sm:grid-cols-2">
-          <LiveCheckButton product={product} onProductUpdate={onProductUpdate} />
-          <AiProductReadButton product={product} onProductUpdate={onProductUpdate} />
+          <LiveCheckButton product={displayed} onProductUpdate={onProductUpdate} />
+          <AiProductReadButton product={displayed} onProductUpdate={onProductUpdate} />
         </div>
       </div>
     </article>

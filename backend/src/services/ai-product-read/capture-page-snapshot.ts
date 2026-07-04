@@ -58,7 +58,7 @@ export async function capturePageSnapshot(
       const text = document.body?.innerText ?? "";
       const products =
         (window as unknown as { products?: WindowProductEntry[] }).products ?? [];
-      const loginHint = /call us|login to see|sign in to see|sign in for price/i.test(text);
+      const loginHint = /call us|login to (?:see|buy)|sign in to see|sign in for price|call for price/i.test(text);
 
       const domProductData: unknown[] = [];
       document

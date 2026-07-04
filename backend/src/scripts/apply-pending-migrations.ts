@@ -15,6 +15,7 @@ const FILES = [
   "003_supplier_refresh_schedule.sql",
   "004_scrape_job_logs.sql",
   "005_ai_read_price_source.sql",
+  "006_product_variant_label.sql",
 ];
 
 async function main() {

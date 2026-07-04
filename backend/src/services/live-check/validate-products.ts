@@ -3,16 +3,16 @@ import type { LiveCheckProductRow, ProductCheckError } from "./types.js";
 
 /**
  * URLs that cannot be live-checked or AI-read (search listings, not product pages).
- * Henry Schein legitimately uses ?ProductCode= on product URLs — do not block those.
+ * `?ProductCode=SKU` is a legitimate, cross-supplier convention (see
+ * `withProductCodeParam` in `parse-product-helpers.ts`) used both as a Henry Schein
+ * category-fallback product URL and to give each variant of a configurable product
+ * (e.g. Adam Dental) its own DB-unique URL on top of a real, shared PDP — do not block
+ * it. Only reject it when it's layered on an actual search-results path.
  */
-export function isBadProductUrl(url: string, supplierSlug?: string): boolean {
+export function isBadProductUrl(url: string): boolean {
   if (url.includes("ProductSearch=")) return true;
 
   if (/\/search\?/i.test(url) && !url.includes("ProductCode=")) return true;
-
-  if (url.includes("ProductCode=")) {
-    return supplierSlug !== "henry-schein";
-  }
 
   return false;
 }
@@ -52,7 +52,7 @@ export function validateProducts(
     }
 
     const url = row.supplier_product_url;
-    if (isBadProductUrl(url, row.suppliers.slug)) {
+    if (isBadProductUrl(url)) {
       errors.push({
         message: "Product URL is not a direct product page",
         productId: row.id,

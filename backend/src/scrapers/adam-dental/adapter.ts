@@ -4,6 +4,7 @@ import { buildContentHash } from "../base-adapter.js";
 import { extractPdpDomFields } from "../../lib/extract-pdp-dom-fields.js";
 import { adamDentalImageUrlsForCode } from "../../lib/product-images.js";
 import {
+  buildVariantMatch,
   categoryPathFromProduct,
   extractProductCodeFromUrl,
   hasValidPrice,
@@ -54,20 +55,32 @@ export class AdamDentalAdapter implements SupplierAdapter {
     const imageCandidates = skuHint ? adamDentalImageUrlsForCode(skuHint) : [];
 
     // 1) Product detail page — stock/name; price often hidden ("Call us!") on APHRA items.
-    let match = await this.loadAndParse(page, canonicalUrl, skuHint);
+    const { products: pageProducts, match: initialMatch } = await this.loadAndParse(
+      page,
+      canonicalUrl,
+      skuHint,
+    );
     // Capture rich DOM fields (description, brand, real stock signal, gallery
     // image) while still on the canonical PDP — steps 2/3 below land on
     // category/search listings that don't carry per-product detail.
     const domFields = await extractPdpDomFields(page, this.slug, skuHint);
+    // A requested variant SKU (e.g. a size) never appears in window.products —
+    // only the parent configurable product does — so fall back to the DOM
+    // variant options table, which carries that row's real price/stock.
+    let match =
+      initialMatch ?? (skuHint ? buildVariantMatch(pageProducts, domFields, skuHint) : null);
     match = mergeDomFields(match, domFields, imageCandidates);
     match = finalizeAdamMatch(match, canonicalUrl);
     if (hasValidPrice(match)) return match;
+    // Confirmed on-page login wall — no fallback URL can produce a trustworthy
+    // public price for this product, so don't bother trying.
+    if (domFields.loginToBuyDetected) return match;
 
     // 2) Category listing — same path as seed scrape (data-product-data has NettPriceFromFirstInc).
     const categoryPath = categoryPathFromProduct(match);
     if (categoryPath && skuHint && !isCategoryListingUrl(canonicalUrl, categoryPath)) {
       const categoryUrl = `${ADAM_DENTAL_BASE}${categoryPath}`;
-      const categoryMatch = await this.loadAndParse(page, categoryUrl, skuHint);
+      const { match: categoryMatch } = await this.loadAndParse(page, categoryUrl, skuHint);
       const resolved = finalizeAdamMatch(
         mergeDomFields(categoryMatch, domFields, imageCandidates),
         canonicalUrl,
@@ -79,7 +92,7 @@ export class AdamDentalAdapter implements SupplierAdapter {
     // 3) Search listing fallback.
     if (skuHint && !pageUrl.includes("ProductSearch=")) {
       const searchUrl = `${ADAM_DENTAL_BASE}/search?ProductSearch=${encodeURIComponent(skuHint)}`;
-      const listingMatch = await this.loadAndParse(page, searchUrl, skuHint);
+      const { match: listingMatch } = await this.loadAndParse(page, searchUrl, skuHint);
       const resolved = finalizeAdamMatch(
         mergeDomFields(listingMatch, domFields, imageCandidates),
         canonicalUrl,
@@ -95,11 +108,11 @@ export class AdamDentalAdapter implements SupplierAdapter {
     page: Page,
     url: string,
     skuHint?: string | null,
-  ): Promise<ProductDetail | null> {
+  ): Promise<{ products: ProductDetail[]; match: ProductDetail | null }> {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: PAGE_TIMEOUT_MS });
     await page.waitForTimeout(PAGE_WAIT_MS);
     const products = await parsePageProducts(page);
-    return pickProductMatch(products, url, skuHint);
+    return { products, match: pickProductMatch(products, url, skuHint) };
   }
 
   /**

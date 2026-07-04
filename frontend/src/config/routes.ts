@@ -2,6 +2,7 @@ export const ROUTES = {
   home: "/",
   chat: "/chat",
   demo: "/demo",
+  demoStart: "/demo/start",
   admin: {
     overview: "/admin",
     chatDesign: "/admin/chat-design",

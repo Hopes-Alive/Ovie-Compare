@@ -11,6 +11,7 @@ import type { ChatMessage, ProductCardData } from "@/types/chat";
 type MessageListProps = {
   messages: ChatMessage[];
   productOverrides?: Record<string, ProductCardData>;
+  variantOverrides?: Record<string, Partial<ProductCardData>>;
   onProductUpdate?: (productId: string, updates: Partial<ProductCardData>) => void;
   isLoading?: boolean;
 };
@@ -22,6 +23,7 @@ function scrollAnchorIntoView(node: HTMLElement | null | undefined) {
 export function MessageList({
   messages,
   productOverrides,
+  variantOverrides,
   onProductUpdate,
   isLoading,
 }: MessageListProps) {
@@ -86,9 +88,19 @@ export function MessageList({
           if (message.role === "assistant" && !message.content && !message.products) {
             return null;
           }
-          const products = message.products?.map(
-            (p) => productOverrides?.[p.id] ?? p
-          );
+          const products = message.products?.map((p) => {
+            const merged = productOverrides?.[p.id] ?? p;
+            if (!merged.variants?.length || !variantOverrides) return merged;
+            return {
+              ...merged,
+              variants: merged.variants.map((v) => {
+                const patch = variantOverrides[v.id];
+                return patch
+                  ? { ...v, price: patch.price ?? v.price, stockStatus: patch.stockStatus ?? v.stockStatus }
+                  : v;
+              }),
+            };
+          });
           const isLast = index === messages.length - 1;
           const isStreaming =
             isLoading && isLast && message.role === "assistant";

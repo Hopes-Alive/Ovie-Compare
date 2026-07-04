@@ -29,6 +29,10 @@ export function ChatPageContent() {
   const [theme, setTheme] = useState<ChatDesignTheme>(DEFAULT_CHAT_DESIGN);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [productOverrides, setProductOverrides] = useState<Record<string, ProductCardData>>({});
+  // Patches for a *variant* option (id differs from its parent card's own id) —
+  // applied onto the matching entry of the card's `variants[]` array instead of
+  // replacing the whole card, which represents a different DB row/SKU.
+  const [variantOverrides, setVariantOverrides] = useState<Record<string, Partial<ProductCardData>>>({});
   const [isLoading, setIsLoading] = useState(false);
 
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -157,19 +161,23 @@ export function ChatPageContent() {
 
   const handleProductUpdate = useCallback(
     (productId: string, updates: Partial<ProductCardData>) => {
-      setProductOverrides((prev) => {
-        const base =
-          prev[productId] ??
-          messages.flatMap((m) => m.products ?? []).find((p) => p.id === productId);
-        if (!base) return prev;
-        return {
-          ...prev,
-          [productId]: {
-            ...base,
-            ...updates,
-          },
-        };
-      });
+      const allCards = messages.flatMap((m) => m.products ?? []);
+      const isTopLevelCard = allCards.some((p) => p.id === productId);
+
+      if (isTopLevelCard) {
+        setProductOverrides((prev) => {
+          const base = prev[productId] ?? allCards.find((p) => p.id === productId);
+          if (!base) return prev;
+          return { ...prev, [productId]: { ...base, ...updates } };
+        });
+        return;
+      }
+
+      // Not a card's own id — it's the currently-selected variant option.
+      setVariantOverrides((prev) => ({
+        ...prev,
+        [productId]: { ...prev[productId], ...updates },
+      }));
     },
     [messages]
   );
@@ -196,6 +204,7 @@ export function ChatPageContent() {
             <MessageList
               messages={messages}
               productOverrides={productOverrides}
+              variantOverrides={variantOverrides}
               onProductUpdate={handleProductUpdate}
               isLoading={isLoading}
             />

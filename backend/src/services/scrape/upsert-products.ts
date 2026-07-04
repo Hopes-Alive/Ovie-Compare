@@ -12,6 +12,7 @@ type ExistingRow = {
   category: string | null;
   subcategory: string | null;
   pack_size: string | null;
+  variant_label: string | null;
   description: string | null;
   image_src: string | null;
   stock_status: string | null;
@@ -132,6 +133,7 @@ function textFieldsChanged(existing: ExistingRow, product: ProductDetail): boole
     [existing.category, product.category ?? null],
     [existing.subcategory, product.subcategory ?? null],
     [existing.pack_size, product.packSize ?? null],
+    [existing.variant_label, product.variantLabel ?? null],
     [existing.description, product.description ?? null],
   ];
   return candidates.some(([a, b]) => String(a ?? "") !== String(b ?? ""));
@@ -160,7 +162,11 @@ function mergeMetadata(
 /**
  * Build a minimal UPDATE patch: only fields that actually changed.
  * Never overwrites DB values with null when the scrape did not supply data
- * (preserves enrich-worker description/brand/image and existing metadata).
+ * (preserves enrich-worker description/brand/image and existing metadata) —
+ * EXCEPT price when the supplier now shows a confirmed login wall
+ * (`login_required`): a missing price from a flaky parse is left alone, but
+ * an explicit "Login to buy" / "Call us!" detection means the old price is
+ * stale and must not keep being served to chat as if it's still current.
  */
 function buildSurgicalUpdatePatch(
   existing: ExistingRow,
@@ -178,6 +184,8 @@ function buildSurgicalUpdatePatch(
 
   if (product.price != null && product.price > 0 && pricesDiffer(existing.price, product.price)) {
     patch.price = product.price;
+  } else if (loginRequired(product) && existing.price != null) {
+    patch.price = null;
   }
 
   const stock = product.stockStatus ?? "unknown";
@@ -193,6 +201,10 @@ function buildSurgicalUpdatePatch(
 
   if ((product.packSize ?? null) !== (existing.pack_size ?? null)) {
     patch.pack_size = product.packSize ?? null;
+  }
+
+  if ((product.variantLabel ?? null) !== (existing.variant_label ?? null)) {
+    patch.variant_label = product.variantLabel ?? null;
   }
 
   if (product.url !== existing.supplier_product_url) {
@@ -265,9 +277,11 @@ function scrapedDataDiffers(
   if (existing.content_hash !== contentHash) return true;
 
   if (product.price != null && pricesDiffer(existing.price, product.price)) return true;
+  if (loginRequired(product) && existing.price != null) return true;
   if ((product.stockStatus ?? "unknown") !== (existing.stock_status ?? "unknown")) return true;
   if (product.name !== existing.name) return true;
   if ((product.packSize ?? null) !== (existing.pack_size ?? null)) return true;
+  if ((product.variantLabel ?? null) !== (existing.variant_label ?? null)) return true;
   if (product.url !== existing.supplier_product_url) return true;
   if (product.brand != null && product.brand !== (existing.brand ?? null)) return true;
   if (product.category != null && product.category !== (existing.category ?? null)) return true;
@@ -293,6 +307,7 @@ const CHANGE_LABELS: Record<string, string> = {
   name: "Name",
   brand: "Brand",
   pack_size: "Pack size",
+  variant_label: "Variant",
   category: "Category",
   subcategory: "Subcategory",
   description: "Description",
@@ -321,6 +336,7 @@ const TRACKED_DATA_FIELDS = [
   "stock_status",
   "stock_quantity",
   "pack_size",
+  "variant_label",
   "brand",
   "category",
   "subcategory",
@@ -362,6 +378,8 @@ function existingFieldValue(existing: ExistingRow, field: string): unknown {
       return existing.brand;
     case "pack_size":
       return existing.pack_size;
+    case "variant_label":
+      return existing.variant_label;
     case "category":
       return existing.category;
     case "subcategory":
@@ -448,7 +466,7 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
   ];
 
   const selectCols =
-    "id, external_id, supplier_product_url, content_hash, price, name, brand, category, subcategory, pack_size, description, image_src, stock_status, stock_quantity, unit_of_measure, delivery_text, delivery_min_days, delivery_max_days, metadata";
+    "id, external_id, supplier_product_url, content_hash, price, name, brand, category, subcategory, pack_size, variant_label, description, image_src, stock_status, stock_quantity, unit_of_measure, delivery_text, delivery_min_days, delivery_max_days, metadata";
 
   const existingByUrlRows = await fetchExistingRowsByColumn(
     supplierId,
@@ -525,6 +543,7 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
           category: product.category ?? null,
           subcategory: product.subcategory ?? null,
           pack_size: product.packSize ?? null,
+          variant_label: product.variantLabel ?? null,
           description: product.description ?? null,
           image_src: product.imageSrc ?? null,
           price: product.price ?? null,
@@ -568,11 +587,12 @@ export async function upsertProducts(options: UpsertProductsOptions): Promise<Up
       if (textFieldsChanged(existing, product)) {
         stats.needsEmbedding++;
       }
-      if (product.price != null && pricesDiffer(existing.price, product.price)) {
+      const clearingStalePrice = loginRequired(product) && product.price == null && existing.price != null;
+      if ((product.price != null && pricesDiffer(existing.price, product.price)) || clearingStalePrice) {
         const historyRow: Record<string, unknown> = {
           supplier_product_id: existing.id,
           old_price: existing.price,
-          new_price: product.price,
+          new_price: clearingStalePrice ? null : product.price,
           changed_at: now,
           source: priceHistorySource,
         };

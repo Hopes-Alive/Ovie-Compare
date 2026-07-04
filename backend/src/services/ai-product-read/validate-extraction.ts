@@ -82,10 +82,21 @@ export function validateExtraction(
   row: LiveCheckProductRow,
 ): ValidatedExtraction {
   const refPrice = referencePriceFromSnapshot(snapshot);
-  const loginRequired = extraction.loginRequired || snapshot.loginHint;
+  // A DOM-confirmed login wall (visible "Login to buy" text) is ground truth
+  // for what an anonymous visitor sees — it overrides even a numeric price
+  // found in window.products/data-product-data, which some SAP Commerce PDPs
+  // still populate behind the scenes. `extraction.loginRequired` alone (just
+  // the LLM's own read of the page) is weaker and still deferred to a parsed
+  // structured price when one exists.
+  const domConfirmedLoginRequired = snapshot.loginHint;
+  const loginRequired = extraction.loginRequired || domConfirmedLoginRequired;
   const parsed = snapshot.parsedProduct;
 
-  if (loginRequired && (extraction.price == null || extraction.price <= 0) && !hasParsedPrice(parsed)) {
+  if (
+    loginRequired &&
+    (domConfirmedLoginRequired || extraction.price == null || extraction.price <= 0) &&
+    (domConfirmedLoginRequired || !hasParsedPrice(parsed))
+  ) {
     const product = mergeExtraction(snapshot, {
       ...extraction,
       price: row.price != null ? Number(row.price) : null,

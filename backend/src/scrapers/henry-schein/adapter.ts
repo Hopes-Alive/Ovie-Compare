@@ -4,6 +4,7 @@ import { buildContentHash } from "../base-adapter.js";
 import { extractPdpDomFields } from "../../lib/extract-pdp-dom-fields.js";
 import { henryScheinImageUrlsForCode } from "../../lib/product-images.js";
 import {
+  buildVariantMatch,
   extractProductCodeFromUrl,
   hasValidPrice,
   mergeDomFields,
@@ -41,19 +42,28 @@ export class HenryScheinAdapter implements SupplierAdapter {
     // image) while we're still on the actual product detail page — fallback
     // navigations below land on category/search listings that don't carry
     // per-product detail.
-    let match = await this.loadAndParse(page, pageUrl, skuHint);
+    const { products: pageProducts, match: initialMatch } = await this.loadAndParse(
+      page,
+      pageUrl,
+      skuHint,
+    );
     const domFields = await extractPdpDomFields(page, this.slug, skuHint);
     const imageCandidates = skuHint ? henryScheinImageUrlsForCode(skuHint) : [];
+    // A requested variant SKU (e.g. a size) never appears in window.products —
+    // only the parent configurable product does — so fall back to the DOM
+    // variant options table, which carries that row's real price/stock.
+    let match =
+      initialMatch ?? (skuHint ? buildVariantMatch(pageProducts, domFields, skuHint) : null);
     match = mergeDomFields(match, domFields, imageCandidates);
     if (hasValidPrice(match)) return match;
+    // Confirmed on-page login wall — no fallback URL can produce a trustworthy
+    // public price for this product, so don't bother trying.
+    if (domFields.loginToBuyDetected) return match;
 
     for (const fallbackUrl of henryScheinFallbackUrls(pageUrl, skuHint)) {
       if (fallbackUrl === pageUrl) continue;
-      const fallbackMatch = mergeDomFields(
-        await this.loadAndParse(page, fallbackUrl, skuHint),
-        domFields,
-        imageCandidates,
-      );
+      const { match: fallbackRawMatch } = await this.loadAndParse(page, fallbackUrl, skuHint);
+      const fallbackMatch = mergeDomFields(fallbackRawMatch, domFields, imageCandidates);
       if (hasValidPrice(fallbackMatch)) return fallbackMatch;
       match = fallbackMatch ?? match;
     }
@@ -65,11 +75,11 @@ export class HenryScheinAdapter implements SupplierAdapter {
     page: Page,
     url: string,
     skuHint?: string | null,
-  ): Promise<ProductDetail | null> {
+  ): Promise<{ products: ProductDetail[]; match: ProductDetail | null }> {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: PAGE_TIMEOUT_MS });
     await page.waitForTimeout(PAGE_WAIT_MS);
     const products = await parsePageProducts(page);
-    return pickProductMatch(products, url, skuHint);
+    return { products, match: pickProductMatch(products, url, skuHint) };
   }
 
   /**
