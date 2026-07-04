@@ -156,6 +156,43 @@ export async function requestCancelRunningRefreshJobs(): Promise<number> {
   return data?.length ?? 0;
 }
 
+/**
+ * Seed scripts (`npm run seed:*`) run in their own foreground process, don't
+ * honour `cancel_requested`, and never write `scrape_job_logs`. If the
+ * process is killed (Ctrl+C, crash, closed terminal) mid-category, its
+ * `scrape_jobs` row is left `status: running` forever. Because
+ * `hasActiveScrapeJob` treats any running seed job as "active" for that
+ * supplier, an orphaned row silently and permanently blocks both the admin
+ * "Run scrape now" button and the scheduler for that supplier — the start
+ * endpoint still reports `started: true` since it never learns *why* zero
+ * suppliers were eligible. Each row is one category (minutes, not hours), so
+ * a multi-hour-stale row is reconciled the same way orphaned refresh jobs are.
+ */
+const STALE_SEED_JOB_MS = 3 * 60 * 60 * 1000;
+
+export async function reconcileOrphanedSeedJobs(): Promise<void> {
+  const { data, error } = await supabase
+    .from("scrape_jobs")
+    .select("id, started_at, created_at")
+    .in("job_type", ["category_seed", "full_seed", "search_seed"])
+    .eq("status", "running");
+
+  if (error) throw new Error(`Failed to load running seed jobs: ${error.message}`);
+
+  const now = Date.now();
+  for (const job of (data ?? []) as Array<{ id: string; started_at: string | null; created_at: string }>) {
+    const startedAt = new Date(job.started_at ?? job.created_at).getTime();
+    if (now - startedAt < STALE_SEED_JOB_MS) continue;
+
+    await finishScrapeJob(
+      job.id,
+      EMPTY_STATS,
+      "Orphaned — seed script process ended without finishing",
+      "partial",
+    );
+  }
+}
+
 /** Finish jobs stuck in `running` after a crash or when no worker picks up cancel. */
 export async function reconcileOrphanedRunningJobs(inProcessRunning: boolean): Promise<void> {
   const jobs = await getRunningRefreshJobs();

@@ -3,11 +3,13 @@
  */
 import {
   getRunningRefreshJobs,
+  hasActiveScrapeJob,
   reconcileOrphanedRunningJobs,
+  reconcileOrphanedSeedJobs,
   requestCancelRunningRefreshJobs,
 } from "./scrape-job.js";
 import { appendScrapeLog } from "./scrape-log.js";
-import { runAllSuppliersRefresh } from "./refresh-runner.js";
+import { loadActiveSuppliers, runSuppliersRefreshParallel } from "./refresh-runner.js";
 
 type RunState = {
   running: boolean;
@@ -24,6 +26,7 @@ export function getRunManagerState(): RunState {
 
 export async function getScrapeStatus() {
   await reconcileOrphanedRunningJobs(state.running);
+  await reconcileOrphanedSeedJobs();
 
   const runningJobs = await getRunningRefreshJobs();
   const inProcess = state.running || runningJobs.length > 0;
@@ -51,11 +54,36 @@ export async function startManualScrapeRun(
     return { started: false, message: "A scrape is already in progress" };
   }
 
+  // Resolve eligibility up front (not just inside the fired-off promise) so a
+  // supplier with an orphaned/active scrape_job — e.g. a `seed` script left
+  // stuck at `status: running` — produces an honest "nothing to run" response
+  // instead of a false "Scrape started" with zero jobs ever created.
+  const suppliers = await loadActiveSuppliers();
+  const blocked: string[] = [];
+  const eligible = [];
+  for (const supplier of suppliers) {
+    if (await hasActiveScrapeJob(supplier.id)) {
+      blocked.push(supplier.name);
+    } else {
+      eligible.push(supplier);
+    }
+  }
+
+  if (eligible.length === 0) {
+    return {
+      started: false,
+      message:
+        blocked.length > 0
+          ? `No suppliers eligible — already has an active scrape job: ${blocked.join(", ")}`
+          : "No active suppliers configured to scrape",
+    };
+  }
+
   state = { running: true, startedAt: new Date().toISOString(), jobIds: [] };
 
   activeRun = (async () => {
     try {
-      const result = await runAllSuppliersRefresh("admin", options);
+      const result = await runSuppliersRefreshParallel(eligible, "admin", options);
       state.jobIds = result.jobIds;
     } finally {
       state = { running: false, startedAt: null, jobIds: state.jobIds };
@@ -63,7 +91,12 @@ export async function startManualScrapeRun(
     }
   })();
 
-  return { started: true, message: "Scrape started" };
+  const startedMessage =
+    blocked.length > 0
+      ? `Scrape started for ${eligible.map((s) => s.name).join(", ")} (skipped ${blocked.join(", ")} — already active)`
+      : "Scrape started";
+
+  return { started: true, message: startedMessage };
 }
 
 export async function cancelScrapeRun(): Promise<{ cancelled: boolean; message: string }> {

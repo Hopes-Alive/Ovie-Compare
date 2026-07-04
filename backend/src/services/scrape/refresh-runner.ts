@@ -19,6 +19,7 @@ import {
   failScrapeJob,
   hasActiveScrapeJob,
   isJobCancelRequested,
+  reconcileOrphanedSeedJobs,
   type ScrapeJobTriggeredBy,
 } from "./scrape-job.js";
 import { loadProgressSet, saveProgressSet, clearProgressSet } from "./progress-file.js";
@@ -522,6 +523,12 @@ export async function runSuppliersRefreshParallel(
   triggeredBy: ScrapeJobTriggeredBy,
   options: RefreshRunOptions = {},
 ): Promise<{ jobIds: string[]; cancelled: boolean }> {
+  // Reconcile stale seed-script `scrape_jobs` rows here too (not just on the
+  // admin status poll) so the scheduler — which calls this directly, without
+  // ever hitting `getScrapeStatus()` — doesn't stay silently blocked forever
+  // by an orphaned `category_seed` row for a supplier.
+  await reconcileOrphanedSeedJobs();
+
   const eligible: SupplierRow[] = [];
   for (const supplier of suppliers) {
     if (await hasActiveScrapeJob(supplier.id)) continue;
