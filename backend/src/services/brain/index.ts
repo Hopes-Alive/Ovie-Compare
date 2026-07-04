@@ -20,28 +20,66 @@ import type { BrainInput, SseEvent } from "./types.js";
 
 const TOTAL_STEPS = 4;
 
+/** Words-per-chunk for the synthetic typing effect on plain-chat replies. */
+const CHAT_CHUNK_WORDS = 3;
+const CHAT_CHUNK_DELAY_MS = 25;
+
+async function* streamPlainReply(reply: string): AsyncGenerator<SseEvent> {
+  const words = reply.split(/(\s+)/); // keep whitespace so we don't lose spacing
+  let buffer = "";
+  for (const word of words) {
+    buffer += word;
+    if (buffer.trim().split(/\s+/).length >= CHAT_CHUNK_WORDS || word === words[words.length - 1]) {
+      yield { type: "token", text: buffer };
+      buffer = "";
+      await new Promise((resolve) => setTimeout(resolve, CHAT_CHUNK_DELAY_MS));
+    }
+  }
+  if (buffer) yield { type: "token", text: buffer };
+}
+
 export async function* runBrainPipeline(input: BrainInput): AsyncGenerator<SseEvent> {
   const pipelineStart = Date.now();
   logPipelineStart(input.message);
 
-  // ── Step 1: Planning (Turn 1 LLM call) ──────────────────────────────────
-  logStepStart(1, TOTAL_STEPS, "Planning  (query rewrite + filter extraction)");
+  // ── Step 1: Planning (Turn 1 LLM call — decides: chat naturally, or search) ─
+  logStepStart(1, TOTAL_STEPS, "Planning  (intent + query rewrite + filter extraction)");
   const t1 = stepTimer();
-  let filters;
+  let plannerResult;
   try {
-    filters = await plannerTurn(input.message, input.history);
+    plannerResult = await plannerTurn(input.message, input.history);
     logStepDetail("message", input.message);
-    logStepDetail("rewrite", filters.rewritten_query);
-    const activeFilters = Object.entries(filters)
-      .filter(([k, v]) => k !== "rewritten_query" && v != null)
-      .reduce<Record<string, unknown>>((acc, [k, v]) => { acc[k] = v; return acc; }, {});
-    logStepDetail("filters", Object.keys(activeFilters).length > 0 ? activeFilters : "(none)");
+    logStepDetail("intent", plannerResult.type);
+    if (plannerResult.type === "search") {
+      logStepDetail("rewrite", plannerResult.filters.rewritten_query);
+      const activeFilters = Object.entries(plannerResult.filters)
+        .filter(([k, v]) => k !== "rewritten_query" && v != null)
+        .reduce<Record<string, unknown>>((acc, [k, v]) => { acc[k] = v; return acc; }, {});
+      logStepDetail("filters", Object.keys(activeFilters).length > 0 ? activeFilters : "(none)");
+    } else {
+      logStepDetail("reply", plannerResult.reply);
+    }
     logStepDone(1, TOTAL_STEPS, t1());
   } catch (err) {
     logStepError(1, TOTAL_STEPS, err);
     yield { type: "error", message: "Failed to understand your message. Please try again." };
     return;
   }
+
+  // ── Not a product query — just chat naturally, skip retrieval entirely ──
+  if (plannerResult.type === "chat") {
+    logStepStart(2, TOTAL_STEPS, "Conversational reply  (no product search)");
+    const t2 = stepTimer();
+    for await (const event of streamPlainReply(plannerResult.reply)) {
+      yield event;
+    }
+    logStepDone(2, TOTAL_STEPS, t2());
+    logPipelineEnd({ totalMs: Date.now() - pipelineStart, matched: 0, presented: 0, fallback: false });
+    yield { type: "done" };
+    return;
+  }
+
+  const filters = plannerResult.filters;
 
   // ── Step 2: Retrieval (parallel SQL count + embed → cosine sort / FTS fallback) ─
   logStepStart(2, TOTAL_STEPS, "Retrieval  (filter query + embed in parallel)");

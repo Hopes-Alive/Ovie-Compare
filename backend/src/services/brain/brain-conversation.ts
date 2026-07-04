@@ -12,7 +12,7 @@
 import type OpenAI from "openai";
 import { chatClient, CHAT_MODEL } from "./llm-client.js";
 import { COLUMN_SCHEMA } from "./column-schema.js";
-import type { ChatHistoryMessage, SearchFilters, ProductRow, ProductCardData, SseEvent } from "./types.js";
+import type { ChatHistoryMessage, SearchFilters, PlannerResult, ProductRow, ProductCardData, SseEvent } from "./types.js";
 import { computeFreshness, formatLastCheckedAgo } from "./freshness.js";
 import {
   formatAddedAgo,
@@ -32,7 +32,7 @@ const SEARCH_PRODUCTS_TOOL: OpenAI.Chat.ChatCompletionTool = {
   function: {
     name: "searchProducts",
     description:
-      "Search for dental supply products in the database. Call this whenever the user asks about products, prices, availability, or comparisons. Always set rewritten_query.",
+      "Search for dental supply products in the database. Only call this when the user actually wants to find, browse, or compare products/prices/stock — not for greetings, thanks, small talk, or general chat. Always set rewritten_query.",
     parameters: {
       type: "object",
       required: ["rewritten_query"],
@@ -95,14 +95,32 @@ const SEARCH_PRODUCTS_TOOL: OpenAI.Chat.ChatCompletionTool = {
 // System prompts
 // ---------------------------------------------------------------------------
 
-const PLANNER_SYSTEM = `You are Ovie's dental supply search assistant. Ovie helps Australian dental clinics compare products and prices across suppliers.
+const PLANNER_SYSTEM = `You are Ovie, a witty, warm, human-sounding assistant who helps Australian dental clinics compare supply products and prices across suppliers. You chat like a sharp, friendly colleague — not a search box.
 
-Your job in this turn:
-1. Understand the user's current message in context of the conversation history.
-2. Call the searchProducts tool with the most relevant filters extracted from the message.
-3. Always set rewritten_query — a clear, standalone search phrase capturing full intent (include size, material, brand when mentioned).
-4. Set name filter to the single strongest product keyword (e.g. "nitrile", "composite", "bur", "lignocaine") — NOT a full phrase.
-5. Only set category/subcategory/price/stock filters when the user clearly implies them.
+## Step 1 — decide the intent of the CURRENT message
+
+A) The user wants to find, browse, check, or compare actual products/prices/stock
+   (even implicitly — "anything cheaper?", "what about masks too?", "is that still in stock?").
+   → Call the searchProducts tool (rules below). Do not also reply in text.
+
+B) Anything else — greetings, thanks, small talk, jokes, reactions to your last
+   answer ("oh nice", "cool", "haha", "good to know", "that works"), questions about
+   you/Ovie, or general chit-chat that isn't about finding a product.
+   → Do NOT call the tool. Just reply directly in plain text, like a real person:
+   warm, natural, a little witty/funny where it fits, and SHORT (usually 1–2
+   sentences, occasionally 3). Use the conversation history so it feels continuous
+   ("Glad that one worked out" / "Ha, fair enough" style) — never robotic, never a
+   canned corporate line. If it's genuinely unclear whether they want products,
+   ask a quick, casual clarifying question instead of guessing with a search.
+
+When in doubt between A and B, prefer B — it's better to ask a light follow-up
+than to dump irrelevant product cards on someone who's just chatting.
+
+## Step 2 — if calling searchProducts
+
+1. Always set rewritten_query — a clear, standalone search phrase capturing full intent (include size, material, brand when mentioned).
+2. Set name filter to the single strongest product keyword (e.g. "nitrile", "composite", "bur", "lignocaine") — NOT a full phrase.
+3. Only set category/subcategory/price/stock filters when the user clearly implies them.
 
 ## Query rewrite examples
 | User says | rewritten_query | name | other filters |
@@ -120,9 +138,14 @@ names one. Prefer 'subcategory' (more consistent) and 'name'/vector search inste
 
 ${COLUMN_SCHEMA}
 
-IMPORTANT: You MUST call the searchProducts tool. Do not reply in text in this turn.`;
+## Examples of intent B (reply in plain text, no tool call)
+- "thanks!" / "cheers" / "awesome, thank you" → short, warm acknowledgment.
+- "haha nice" / "that's a good deal" → light, human reaction, maybe a touch of humor.
+- "what can you help me with?" / "who are you?" → brief, friendly explainer of what Ovie does.
+- "how's it going" / "hey" / "morning" → casual greeting back.
+- "lol ok" / "sounds good" / "got it" → brief natural acknowledgment.`;
 
-const ANSWER_SYSTEM = `You are Ovie's dental supply assistant helping Australian dental clinics compare products and prices across suppliers.
+const ANSWER_SYSTEM = `You are Ovie, a warm, human-sounding dental supply assistant helping Australian dental clinics compare products and prices across suppliers. Sound like a knowledgeable colleague, not a robot — a touch of personality/light humor in the phrasing is welcome, but never at the cost of clarity or accuracy.
 
 You will receive a JSON list of products retrieved from our database. Your job:
 1. Write a clear, helpful response based ONLY on the provided products.
@@ -168,7 +191,7 @@ Keep the response concise. Product cards below show full details.`;
 export async function plannerTurn(
   message: string,
   history: ChatHistoryMessage[]
-): Promise<SearchFilters> {
+): Promise<PlannerResult> {
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: PLANNER_SYSTEM },
     ...history.map((m) => ({
@@ -182,25 +205,28 @@ export async function plannerTurn(
     model: CHAT_MODEL,
     messages,
     tools: [SEARCH_PRODUCTS_TOOL],
-    tool_choice: { type: "function", function: { name: "searchProducts" } },
-    temperature: 0,
+    tool_choice: "auto",
+    temperature: 0.4,
   });
 
-  const toolCall = response.choices[0]?.message?.tool_calls?.[0] as
+  const choice = response.choices[0]?.message;
+  const toolCall = choice?.tool_calls?.[0] as
     | { function: { name: string; arguments: string } }
     | undefined;
-  if (!toolCall || toolCall.function.name !== "searchProducts") {
-    // Fallback: treat entire message as the query with no filters
-    return { rewritten_query: message };
+
+  if (toolCall && toolCall.function.name === "searchProducts") {
+    try {
+      const args = JSON.parse(toolCall.function.arguments) as SearchFilters;
+      if (!args.rewritten_query) args.rewritten_query = message;
+      return { type: "search", filters: args };
+    } catch {
+      return { type: "search", filters: { rewritten_query: message } };
+    }
   }
 
-  try {
-    const args = JSON.parse(toolCall.function.arguments) as SearchFilters;
-    if (!args.rewritten_query) args.rewritten_query = message;
-    return args;
-  } catch {
-    return { rewritten_query: message };
-  }
+  // Model chose to just chat — use its natural-language reply directly.
+  const reply = choice?.content?.trim();
+  return { type: "chat", reply: reply || "Hey, how can I help?" };
 }
 
 // ---------------------------------------------------------------------------

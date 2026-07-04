@@ -16,6 +16,7 @@ const FILES = [
   "004_scrape_job_logs.sql",
   "005_ai_read_price_source.sql",
   "006_product_variant_label.sql",
+  "007_vector_search_columns.sql",
 ];
 
 async function main() {

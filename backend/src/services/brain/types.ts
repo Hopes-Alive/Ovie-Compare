@@ -30,6 +30,15 @@ export interface SearchFilters {
   sort_by?: "price_asc" | "price_desc" | "relevance";
 }
 
+/**
+ * Result of the planner turn: either the user wants to find/compare products
+ * (→ run retrieval + grounded answer), or they're just chatting (→ reply
+ * directly, no product search, no product cards).
+ */
+export type PlannerResult =
+  | { type: "search"; filters: SearchFilters }
+  | { type: "chat"; reply: string };
+
 /** A sibling product from another supplier sharing the same canonical identity */
 export interface CanonicalAlternative {
   id: string;

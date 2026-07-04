@@ -1,37 +1,27 @@
 /**
  * Retrieval service — executes the database search based on LLM-extracted filters.
  *
- * Strategy (hybrid):
- * 1. Run structured filter query + FTS on rewritten_query + embed query in parallel.
- * 2. Merge pools, then reciprocal-rank-fusion (FTS rank + vector rank).
- * 3. Cross-supplier queries run per supplier in parallel, then balance top results.
- *
- * No Postgres stored functions required — works with the Supabase JS client only.
+ * Strategy (hybrid, 3 independent arms per attempt):
+ * 1. Structured filter query (ILIKE on name/brand/category/subcategory + hard filters).
+ * 2. Postgres full-text search on search_vector.
+ * 3. Native pgvector full-table search — the user's rewritten query is embedded, then
+ *    matched against the *entire* supplier_products table server-side (HNSW-indexed
+ *    `ORDER BY embedding <=> query_embedding`), scoped only by "hard" filters
+ *    (supplier/stock/price). This arm intentionally ignores guessable filters
+ *    (name/brand/category/subcategory) so it can rescue genuinely relevant products
+ *    even when the planner's literal-match guesses miss.
+ * All three run in parallel, get merged into one pool, then combined via
+ * reciprocal-rank-fusion (FTS rank + native vector rank).
+ * Cross-supplier queries run per supplier in parallel, then balance top results.
  */
 import { supabase } from "../../lib/supabase.js";
 import { embedText } from "./llm-client.js";
 import type { SearchFilters, SearchResult, ProductRow, VariantOption } from "./types.js";
 
 const FILTER_POOL_LIMIT = 80; // max rows to fetch before hybrid re-ranking
+const VECTOR_POOL_LIMIT = 40; // max rows from the native pgvector full-table search arm
 const RESULT_LIMIT = 5;
 const RRF_K = 60;
-
-// ---------------------------------------------------------------------------
-// Cosine similarity (in-process — fast for small pools)
-// ---------------------------------------------------------------------------
-
-function cosineSimilarity(a: number[], b: number[]): number {
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-  const denom = Math.sqrt(normA) * Math.sqrt(normB);
-  return denom === 0 ? 0 : dot / denom;
-}
 
 // Use any for Supabase query builder — the generic types require generated DB types
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,40 +56,25 @@ const PRODUCT_SELECT = `
   last_changed_at,
   created_at,
   supplier_product_url,
-  embedding,
   metadata,
   suppliers!inner ( slug, name )
 `.trim();
 
 // ---------------------------------------------------------------------------
-// Parse embedding — Supabase may return vectors as strings ("[0.1,0.2,...]")
+// Map raw Supabase row → ProductRow.
+// Handles both shapes returned by our two query paths:
+// - filter/FTS queries: nested `suppliers: { slug, name }` from the join.
+// - the native pgvector RPC: flat `supplier_slug` / `supplier_name` columns,
+//   plus a `similarity` column (cosine similarity computed natively in Postgres).
 // ---------------------------------------------------------------------------
 
-function parseEmbedding(raw: unknown): number[] | null {
-  if (!raw) return null;
-  if (Array.isArray(raw)) return raw as number[];
-  if (typeof raw === "string") {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed as number[];
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// Map raw Supabase row → ProductRow (normalise supplier join)
-// ---------------------------------------------------------------------------
-
-function toProductRow(raw: Record<string, unknown>): ProductRow & { _embedding: number[] | null } {
-  const supplier = raw.suppliers as { slug: string; name: string } | null;
+function toProductRow(raw: Record<string, unknown>): ProductRow {
+  const supplier = raw.suppliers as { slug: string; name: string } | undefined;
   return {
     id: raw.id as string,
     supplier_id: raw.supplier_id as string,
-    supplier_slug: supplier?.slug ?? "",
-    supplier_name: supplier?.name ?? "",
+    supplier_slug: supplier?.slug ?? (raw.supplier_slug as string) ?? "",
+    supplier_name: supplier?.name ?? (raw.supplier_name as string) ?? "",
     external_id: (raw.external_id as string) ?? null,
     external_sku: (raw.external_sku as string) ?? null,
     name: raw.name as string,
@@ -123,7 +98,7 @@ function toProductRow(raw: Record<string, unknown>): ProductRow & { _embedding: 
     created_at: (raw.created_at as string) ?? null,
     supplier_product_url: (raw.supplier_product_url as string) ?? null,
     login_required: Boolean((raw.metadata as Record<string, unknown> | null)?.login_required),
-    _embedding: parseEmbedding(raw.embedding),
+    similarity: typeof raw.similarity === "number" ? raw.similarity : undefined,
   };
 }
 
@@ -141,7 +116,7 @@ async function resolveSupplierId(slug: string): Promise<string | null> {
 }
 
 async function runFilterQuery(filters: SearchFilters): Promise<{
-  rows: Array<ProductRow & { _embedding: number[] | null }>;
+  rows: ProductRow[];
   total: number;
 }> {
   // Resolve supplier_slug → supplier_id if needed
@@ -163,7 +138,6 @@ async function runFilterQuery(filters: SearchFilters): Promise<{
 
   if (total === 0) return { rows: [], total: 0 };
 
-  // Data query (with embedding for cosine sort)
   let dataQuery: AnyQuery = supabase
     .from("supplier_products")
     .select(PRODUCT_SELECT)
@@ -249,36 +223,30 @@ function reciprocalRankFusion(rankedLists: string[][]): Map<string, number> {
   return scores;
 }
 
-type EmbeddedRow = ProductRow & { _embedding: number[] | null };
-
-function scoreAndStripRow(
-  row: EmbeddedRow,
-  queryVector: number[],
-  rrfScores: Map<string, number>,
-): ProductRow {
-  const sim = row._embedding ? cosineSimilarity(queryVector, row._embedding) : 0;
-  const { _embedding, ...rest } = row;
-  return { ...rest, similarity: sim + (rrfScores.get(row.id) ?? 0) * 0.01 };
-}
-
+/**
+ * Combine the filter/FTS pool with the native pgvector arm's own ranking via
+ * reciprocal-rank-fusion. `vectorRows` are the (already Postgres-side-sorted)
+ * results of `runVectorSearch` — their order *is* the vector rank list, and
+ * their `similarity` field (computed natively via `1 - cosine_distance`) is
+ * attached to any pool row it covers. Rows the vector arm didn't return keep
+ * whatever `similarity` they arrived with (0 if none).
+ */
 function hybridRerank(
-  pool: EmbeddedRow[],
-  queryVector: number[],
+  pool: ProductRow[],
+  vectorRows: ProductRow[],
   ftsRankIds: string[],
   sortBy: SearchFilters["sort_by"],
 ): ProductRow[] {
   if (pool.length === 0) return [];
 
-  const vectorRankIds = [...pool]
-    .sort((a, b) => {
-      const simA = a._embedding ? cosineSimilarity(queryVector, a._embedding) : 0;
-      const simB = b._embedding ? cosineSimilarity(queryVector, b._embedding) : 0;
-      return simB - simA;
-    })
-    .map((r) => r.id);
+  const vectorRankIds = vectorRows.map((r) => r.id);
+  const similarityById = new Map(vectorRows.map((r) => [r.id, r.similarity ?? 0]));
 
   const rrfScores = reciprocalRankFusion([ftsRankIds, vectorRankIds]);
-  const scored = pool.map((row) => scoreAndStripRow(row, queryVector, rrfScores));
+  const scored = pool.map((row) => ({
+    ...row,
+    similarity: similarityById.get(row.id) ?? row.similarity ?? 0,
+  }));
 
   if (sortBy === "price_asc") {
     return scored.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
@@ -302,7 +270,7 @@ function hybridRerank(
 async function runFtsSearchFiltered(
   filters: SearchFilters,
   supplierIdFilter: string | null,
-): Promise<EmbeddedRow[]> {
+): Promise<ProductRow[]> {
   const cleaned = cleanQueryForFts(filters.rewritten_query);
   if (!cleaned.trim()) return [];
 
@@ -317,6 +285,31 @@ async function runFtsSearchFiltered(
 
   const { data, error } = await query;
   if (error) throw new Error(`FTS search failed: ${(error as { message: string }).message}`);
+  return ((data as unknown[]) ?? []).map((r) => toProductRow(r as Record<string, unknown>));
+}
+
+// ---------------------------------------------------------------------------
+// Native pgvector full-table search — the third retrieval arm.
+// Scoped only by "hard" filters (supplier/stock/price); deliberately omits
+// name/brand/category/subcategory so it can rescue matches even when those
+// planner-guessed filters are wrong or too literal.
+// ---------------------------------------------------------------------------
+
+async function runVectorSearch(
+  filters: SearchFilters,
+  queryVector: number[],
+  limit: number,
+): Promise<ProductRow[]> {
+  const { data, error } = await supabase.rpc("search_products_with_filters", {
+    query_embedding: queryVector,
+    filter_supplier_slug: filters.supplier_slug ?? null,
+    filter_stock_status: filters.stock_status ?? null,
+    filter_price_exact: filters.price_exact ?? null,
+    filter_price_min: filters.price_min ?? null,
+    filter_price_max: filters.price_max ?? null,
+    result_limit: limit,
+  });
+  if (error) throw new Error(`Vector search failed: ${error.message}`);
   return ((data as unknown[]) ?? []).map((r) => toProductRow(r as Record<string, unknown>));
 }
 
@@ -370,15 +363,20 @@ async function buildHybridPool(filters: SearchFilters): Promise<{
       supplierIdFilter = await resolveSupplierId(effectiveFilters.supplier_slug);
     }
 
-    const [filterResult, ftsRows, queryVector] = await Promise.all([
+    const [filterResult, ftsRows, vectorRows] = await Promise.all([
       runFilterQuery(effectiveFilters),
       runFtsSearchFiltered(effectiveFilters, supplierIdFilter),
-      embedText(filters.rewritten_query),
+      embedText(filters.rewritten_query).then((vec) =>
+        runVectorSearch(effectiveFilters, vec, VECTOR_POOL_LIMIT),
+      ),
     ]);
 
-    const poolMap = new Map<string, EmbeddedRow>();
+    const poolMap = new Map<string, ProductRow>();
     for (const row of filterResult.rows) poolMap.set(row.id, row);
     for (const row of ftsRows) {
+      if (!poolMap.has(row.id)) poolMap.set(row.id, row);
+    }
+    for (const row of vectorRows) {
       if (!poolMap.has(row.id)) poolMap.set(row.id, row);
     }
 
@@ -390,12 +388,12 @@ async function buildHybridPool(filters: SearchFilters): Promise<{
 
     const ranked = hybridRerank(
       pool,
-      queryVector,
+      vectorRows,
       ftsRows.map((r) => r.id),
       effectiveFilters.sort_by ?? filters.sort_by,
     );
 
-    const total = Math.max(filterResult.total, ftsRows.length);
+    const total = Math.max(filterResult.total, ftsRows.length, vectorRows.length);
     return {
       rows: ranked,
       total,
@@ -711,8 +709,7 @@ async function rescueWithoutName(
   };
   const ftsRows = await runFtsSearchFiltered(widened, supplierIdFilter);
   if (ftsRows.length === 0) return [];
-  const queryVector = await embedText(filters.rewritten_query);
-  return hybridRerank(ftsRows, queryVector, ftsRows.map((r) => r.id), filters.sort_by);
+  return hybridRerank(ftsRows, [], ftsRows.map((r) => r.id), filters.sort_by);
 }
 
 // ---------------------------------------------------------------------------
@@ -753,8 +750,7 @@ export async function retrieveProducts(filters: SearchFilters): Promise<SearchRe
       const withAlts = await attachCanonicalAlternatives(top);
       return { rows: withAlts, total: top.length, fallback: true };
     }
-    const queryVector = await embedText(filters.rewritten_query);
-    const ranked = hybridRerank(ftsRows, queryVector, ftsRows.map((r) => r.id), filters.sort_by);
+    const ranked = hybridRerank(ftsRows, [], ftsRows.map((r) => r.id), filters.sort_by);
     const deduped = await attachVariantSiblings(ranked);
     const top = deduped.slice(0, RESULT_LIMIT);
     const withAlts = await attachCanonicalAlternatives(top);

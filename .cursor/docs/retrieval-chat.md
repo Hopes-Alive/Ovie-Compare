@@ -8,7 +8,9 @@ How user questions become grounded product answers.
 
 1. **Structured filters** — price, stock, supplier, sort
 2. **Full-text search** — name, brand, category
-3. **Vector search** — semantic / fuzzy match
+3. **Native pgvector search** — semantic / fuzzy match, run server-side against the
+   **entire** `supplier_products` table via a Postgres RPC (HNSW-indexed), not a
+   JS rerank of whatever the other two arms happened to return
 
 LLM plans and formats; **backend** executes safe retrieval.
 
@@ -25,22 +27,36 @@ Query rewriter (optional)
     "those medium ones" → "nitrile gloves medium"
     ↓
 Planner LLM
-    intent + tool calls (NOT raw SQL)
+    intent classification (chat vs. search) + tool calls (NOT raw SQL)
     ↓
-┌─────────────────────────────────────┐
-│  Retrieval service (backend)        │
-│  parallel:                          │
-│    - structured query + sort        │
-│    - FTS on search_vector           │
-│    - vector similarity on embedding │
-│  → merge / rerank → top K (5–10)    │
-└─────────────────────────────────────┘
-    ↓
-Answer LLM
-    grounded JSON context only
-    ↓
-UI: text + product cards + timestamps + [Check live price]
+    ├── intent = chat (greeting/small talk/thanks/banter/meta)
+    │     → reply directly in plain text, no retrieval, no product cards
+    │
+    └── intent = search (wants to find/compare/check products)
+          ↓
+        ┌───────────────────────────────────────────┐
+        │  Retrieval service (backend)              │
+        │  parallel, per attempt:                   │
+        │    - structured ILIKE query + hard filters │
+        │    - FTS on search_vector + hard filters   │
+        │    - native pgvector RPC (full table,      │
+        │      hard filters only, HNSW-indexed)      │
+        │  → merge pool → RRF(FTS rank, vector rank) │
+        │  → top K (5)                              │
+        └───────────────────────────────────────────┘
+          ↓
+        Answer LLM
+            grounded JSON context only
+          ↓
+        UI: text + product cards + timestamps + [Check live price]
 ```
+
+**Intent gate:** the planner's `searchProducts` tool call is optional (`tool_choice: "auto"`),
+not forced. For non-product turns (greetings, thanks, reactions like "oh nice", jokes,
+questions about Ovie itself) the planner replies in plain text with a warm, human,
+slightly witty tone and skips retrieval entirely — no product cards are shown. This
+keeps multi-turn conversations feeling natural instead of forcing a product search on
+every message. See `plannerTurn` / `PlannerResult` in `backend/src/services/brain/`.
 
 ---
 
@@ -138,20 +154,63 @@ ORDER BY ts_rank(sp.search_vector, plainto_tsquery('english', $query)) DESC
 LIMIT 20;
 ```
 
-### Vector search
+### Native pgvector search (`search_products_with_filters` RPC)
+
+Implemented as a Postgres RPC (`backend/supabase/migrations/002_brain_search_functions.sql`,
+extended in `007_vector_search_columns.sql`) called from `runVectorSearch()` in
+`backend/src/services/brain/retrieval.ts` via `supabase.rpc(...)`. It searches the
+**full table** (~20k+ rows), not a JS-side subset:
 
 ```sql
+SELECT ..., 1 - (sp.embedding <=> $query_embedding) AS similarity
+FROM supplier_products sp
+JOIN suppliers s ON s.id = sp.supplier_id
+WHERE sp.is_active = true AND sp.embedding IS NOT NULL
+  -- only "hard" filters — see note below
+  AND (...supplier_slug / stock_status / price...)
 ORDER BY sp.embedding <=> $query_embedding
-LIMIT 20;
+LIMIT 40;
 ```
+
+Scoped by an HNSW index (`supplier_products_embedding_hnsw_idx`, `vector_cosine_ops`)
+so the `ORDER BY ... LIMIT` is index-accelerated instead of a full sequential scan.
+
+**Deliberately scoped to "hard" filters only** — `supplier_slug`, `stock_status`,
+`price_exact`/`price_min`/`price_max`. It intentionally **ignores** the planner's
+guessable filters (`name`, `brand`, `category`, `subcategory`) so it can still
+surface a genuinely relevant product even when those literal-match guesses are
+wrong or too narrow — that's the whole point of having an independent vector arm
+instead of just reranking the filter/FTS pool.
+
+**Implementation note (important if you touch this function):** the function is
+`LANGUAGE plpgsql` using dynamic SQL (`EXECUTE ... USING`), **not** plain
+`LANGUAGE sql` with `(param IS NULL OR col = param)` predicates. This is required,
+not stylistic — PostgREST always issues `SET ROLE <target>` before running any
+query. The moment a session has executed `SET ROLE` (even back to the same role),
+Postgres stops inlining `LANGUAGE sql` functions and runs them as an opaque
+"Function Scan" with a single cached, value-agnostic plan. For a query with
+several `IS NULL OR` branches, that generic plan can't fold away the NULL
+branches at plan time and falls back to a full sequential scan + sort instead of
+the HNSW-indexed scan — confirmed via `EXPLAIN ANALYZE` to take ~13-16s instead
+of ~0.3-0.8s. Building the WHERE clause dynamically (only including a clause when
+that filter is actually supplied) sidesteps this: each call gets a freshly
+planned query tailored to its actual shape, regardless of the caller's
+role-switching history.
 
 ### Hybrid merge
 
-Run all three in parallel when query is product-related. Merge with **reciprocal rank fusion (RRF)** or weighted scores:
+Run all three arms in parallel per attempt when query is product-related (see
+`buildHybridPool` in `retrieval.ts`). Merge into one deduped pool by row id, then
+combine via **reciprocal rank fusion (RRF)** over the FTS rank list and the
+native vector arm's own rank list (the vector RPC's results are already sorted
+by Postgres, so no JS-side cosine computation happens at all):
 
 ```
-final_score = w1 * structured_rank + w2 * fts_rank + w3 * vector_rank
+rrf_score(id) = 1/(k + fts_rank(id) + 1) + 1/(k + vector_rank(id) + 1)   // k = 60
 ```
+
+Final ordering: RRF score desc, tie-broken by the vector arm's native
+`similarity` value (0 for rows the vector arm didn't return).
 
 **Heuristics:**
 - "cheapest" → boost structured, force `sortBy: price_asc`
@@ -178,11 +237,15 @@ never 13 near-duplicate cards for the same physical product.
 
 ### Progressive fallback if few results
 
-1. Drop optional filters (brand, maxPrice)
-2. Widen category match
-3. `pg_trgm` similarity on name
-4. Vector-only search
+1. Drop optional filters (brand, maxPrice) — see the widening `attempts` list in `buildHybridPool`
+2. Widen category/subcategory match
+3. Drop stock filter (so an out-of-stock row can still be reported truthfully)
+4. Absolute last resort: drop `name` entirely, FTS-only on the dropped keyword (`rescueWithoutName`)
 5. Planner asks clarifying question
+
+Note: the native pgvector arm (see above) already runs on every attempt regardless
+of `name`/`category`, so most cases that used to need a "vector-only" fallback are
+now caught on the very first attempt instead of needing to progressively widen.
 
 ---
 

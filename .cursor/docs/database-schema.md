@@ -101,9 +101,11 @@ One row per product per supplier. Main table for search and chat.
 - `(last_checked_at)`
 - `(scrape_priority, last_checked_at)`
 - GIN on `search_vector`
-- ivfflat on `embedding` (when enough rows)
+- `supplier_products_embedding_hnsw_idx`: HNSW (`vector_cosine_ops`) on `embedding` WHERE `is_active = true` (migration `007_vector_search_columns.sql`) — powers the native pgvector retrieval arm, see below
 
 **Embedding rule:** embed `name + brand + category + pack_size + description`. Do NOT re-embed on price/stock-only updates.
+
+**Search RPC:** `search_products_with_filters(query_embedding, filter_name, filter_brand, filter_category, filter_subcategory, filter_supplier_slug, filter_stock_status, filter_price_exact, filter_price_min, filter_price_max, result_limit)` — defined in `backend/supabase/migrations/002_brain_search_functions.sql`, extended in `007_vector_search_columns.sql` (added `variant_label`/`created_at`/`metadata` to the return shape). Called from `backend/src/services/brain/retrieval.ts`'s `runVectorSearch()` as the third, independent full-table retrieval arm (see `retrieval-chat.md`) — always called with only the "hard" filters (`filter_supplier_slug`/`filter_stock_status`/`filter_price_*`) populated, the guessable ones left `NULL`. `LANGUAGE plpgsql` with dynamic SQL, not `LANGUAGE sql` — required so PostgREST's per-request `SET ROLE` doesn't force a slow, non-indexed generic query plan (see `retrieval-chat.md` for the full explanation). The old `search_products_vector_only` (a strict subset of this function called with all filters NULL) was dropped in `007_vector_search_columns.sql` as redundant.
 
 ---
 
