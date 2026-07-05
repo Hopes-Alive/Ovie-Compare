@@ -13,15 +13,29 @@
  * All three run in parallel, get merged into one pool, then combined via
  * reciprocal-rank-fusion (FTS rank + native vector rank).
  * Cross-supplier queries run per supplier in parallel, then balance top results.
+ *
+ * Confidence gate: if structured+FTS found nothing real and the vector arm's best
+ * hit is below VECTOR_CONFIDENCE_THRESHOLD, that's treated as "no match yet" and the
+ * widening loop (drop subcategory → drop category → drop stock_status) keeps going
+ * instead of settling for a weak, often wrong-category vector guess (e.g. surfacing a
+ * root canal file for "nitrile gloves" because it was merely the least-dissimilar row
+ * in the whole table).
  */
 import { supabase } from "../../lib/supabase.js";
 import { embedText } from "./llm-client.js";
+import { logInfo, stepTimer } from "./logger.js";
 import type { SearchFilters, SearchResult, ProductRow, VariantOption } from "./types.js";
 
 const FILTER_POOL_LIMIT = 80; // max rows to fetch before hybrid re-ranking
 const VECTOR_POOL_LIMIT = 40; // max rows from the native pgvector full-table search arm
 const RESULT_LIMIT = 5;
 const RRF_K = 60;
+// Below this cosine similarity, a vector-only hit (no structured/FTS corroboration) is
+// treated as "not actually a match" rather than accepted — see the widening loop in
+// buildHybridPool(). Calibrated against real query logs: genuine matches for a guessed
+// name/category typically score 0.5-0.75+; wrong-category "closest thing we have" guesses
+// (e.g. a root canal file for "nitrile gloves") score ~0.35-0.42.
+const VECTOR_CONFIDENCE_THRESHOLD = 0.45;
 
 // Use any for Supabase query builder — the generic types require generated DB types
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -213,6 +227,15 @@ function enrichFiltersWithKeywords(filters: SearchFilters): SearchFilters {
   return { ...filters, name: primary };
 }
 
+/** Compact `key=value, key=value` summary of the "hard"/"guessable" filters active on an attempt. */
+function describeFilters(f: SearchFilters): string {
+  const entries = Object.entries(f).filter(
+    ([k, v]) => k !== "rewritten_query" && v != null,
+  );
+  if (entries.length === 0) return "no filters — query text only";
+  return entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ");
+}
+
 function reciprocalRankFusion(rankedLists: string[][]): Map<string, number> {
   const scores = new Map<string, number>();
   for (const list of rankedLists) {
@@ -313,11 +336,14 @@ async function runVectorSearch(
   return ((data as unknown[]) ?? []).map((r) => toProductRow(r as Record<string, unknown>));
 }
 
-async function buildHybridPool(filters: SearchFilters): Promise<{
+async function buildHybridPool(filters: SearchFilters, label?: string): Promise<{
   rows: ProductRow[];
   total: number;
   ftsPrimary: boolean;
+  logLines: string[];
 }> {
+  const logLines: string[] = [];
+  const tag = label ? `[${label}] ` : "";
   const attempts: SearchFilters[] = [enrichFiltersWithKeywords(filters)];
 
   if (filters.subcategory) {
@@ -357,19 +383,68 @@ async function buildHybridPool(filters: SearchFilters): Promise<{
 
   let ftsPrimary = false;
 
-  for (const effectiveFilters of attempts) {
+  // The vector arm only ever looks at "hard" filters (supplier/stock/price) — never
+  // name/category/subcategory — so its result is identical across attempts unless an
+  // attempt actually changes one of those hard filters (only the stock_status-drop
+  // attempt does). Embed once and cache the RPC call per distinct hard-filter shape
+  // instead of repeating an identical ~1s embed+search on every widening attempt.
+  const queryVector = await embedText(filters.rewritten_query);
+  const vectorCache = new Map<string, Promise<ProductRow[]>>();
+  function vectorSearchCached(f: SearchFilters): Promise<ProductRow[]> {
+    const key = JSON.stringify([
+      f.supplier_slug ?? null,
+      f.stock_status ?? null,
+      f.price_exact ?? null,
+      f.price_min ?? null,
+      f.price_max ?? null,
+    ]);
+    let cached = vectorCache.get(key);
+    if (!cached) {
+      cached = runVectorSearch(f, queryVector, VECTOR_POOL_LIMIT);
+      vectorCache.set(key, cached);
+    }
+    return cached;
+  }
+
+  for (let i = 0; i < attempts.length; i++) {
+    const effectiveFilters = attempts[i];
+    const isLastAttempt = i === attempts.length - 1;
+    const attemptLabel =
+      attempts.length > 1 ? `attempt ${i + 1}/${attempts.length}` : "attempt";
+    logLines.push(`${tag}${attemptLabel} — ${describeFilters(effectiveFilters)}`);
+
     let supplierIdFilter: string | null = null;
     if (effectiveFilters.supplier_slug) {
       supplierIdFilter = await resolveSupplierId(effectiveFilters.supplier_slug);
     }
 
+    const tFilter = stepTimer();
+    const tFts = stepTimer();
+    const tVector = stepTimer();
+    let filterMs = 0;
+    let ftsMs = 0;
+    let vectorMs = 0;
+
     const [filterResult, ftsRows, vectorRows] = await Promise.all([
-      runFilterQuery(effectiveFilters),
-      runFtsSearchFiltered(effectiveFilters, supplierIdFilter),
-      embedText(filters.rewritten_query).then((vec) =>
-        runVectorSearch(effectiveFilters, vec, VECTOR_POOL_LIMIT),
-      ),
+      runFilterQuery(effectiveFilters).then((r) => {
+        filterMs = tFilter();
+        return r;
+      }),
+      runFtsSearchFiltered(effectiveFilters, supplierIdFilter).then((r) => {
+        ftsMs = tFts();
+        return r;
+      }),
+      vectorSearchCached(effectiveFilters).then((r) => {
+        vectorMs = tVector();
+        return r;
+      }),
     ]);
+
+    logLines.push(
+      `  ├─ structured (ILIKE)        ${filterResult.total} matched, ${filterResult.rows.length} fetched   ${filterMs}ms`,
+    );
+    logLines.push(`  ├─ full-text (FTS)           ${ftsRows.length} rows   ${ftsMs}ms`);
+    logLines.push(`  └─ pgvector (HNSW, all rows) ${vectorRows.length} rows   ${vectorMs}ms`);
 
     const poolMap = new Map<string, ProductRow>();
     for (const row of filterResult.rows) poolMap.set(row.id, row);
@@ -383,6 +458,20 @@ async function buildHybridPool(filters: SearchFilters): Promise<{
     const pool = [...poolMap.values()];
     if (pool.length === 0) {
       ftsPrimary = filterResult.total === 0;
+      logLines.push(`  → no matches — widening and retrying`);
+      continue;
+    }
+
+    // Structured/FTS found nothing real, and the vector arm's best guess is too
+    // weak to trust as-is — that's the "root canal file for nitrile gloves"
+    // failure mode. Widen the category/subcategory guess first instead of
+    // settling for it, unless this is already the last attempt available.
+    const hasRealMatch = filterResult.total > 0 || ftsRows.length > 0;
+    const topSimilarity = vectorRows[0]?.similarity ?? 0;
+    if (!hasRealMatch && topSimilarity < VECTOR_CONFIDENCE_THRESHOLD && !isLastAttempt) {
+      logLines.push(
+        `  → only a weak vector guess (top similarity ${topSimilarity.toFixed(2)}) and no structured/FTS hits — widening instead of accepting it`,
+      );
       continue;
     }
 
@@ -394,14 +483,19 @@ async function buildHybridPool(filters: SearchFilters): Promise<{
     );
 
     const total = Math.max(filterResult.total, ftsRows.length, vectorRows.length);
+    logLines.push(
+      `  → merged pool: ${pool.length} unique rows → RRF(fts, vector) rerank → top ${Math.min(ranked.length, RESULT_LIMIT)} kept`,
+    );
     return {
       rows: ranked,
       total,
       ftsPrimary: filterResult.total === 0 && ftsRows.length > 0,
+      logLines,
     };
   }
 
-  return { rows: [], total: 0, ftsPrimary };
+  logLines.push(`${tag}no results after ${attempts.length} attempt(s)`);
+  return { rows: [], total: 0, ftsPrimary, logLines };
 }
 
 // ---------------------------------------------------------------------------
@@ -652,6 +746,7 @@ async function runPerSupplierHybridSearch(filters: SearchFilters): Promise<{
   totalBySupplier: Record<string, number>;
   ftsPrimary: boolean;
 }> {
+  logInfo("no supplier specified — searching all suppliers in parallel:");
   const results = await Promise.all(
     ALL_SUPPLIER_SLUGS.map(async (slug) => {
       const supplierFilters: SearchFilters = {
@@ -659,8 +754,8 @@ async function runPerSupplierHybridSearch(filters: SearchFilters): Promise<{
         supplier_slug: slug,
         category: mapCategoryForSupplier(filters.category, slug),
       };
-      const { rows, total, ftsPrimary } = await buildHybridPool(supplierFilters);
-      return { slug, rows, total, ftsPrimary };
+      const { rows, total, ftsPrimary, logLines } = await buildHybridPool(supplierFilters, slug);
+      return { slug, rows, total, ftsPrimary, logLines };
     }),
   );
 
@@ -668,11 +763,16 @@ async function runPerSupplierHybridSearch(filters: SearchFilters): Promise<{
   const totalBySupplier: Record<string, number> = {};
   let ftsPrimary = false;
 
-  for (const { slug, rows, total, ftsPrimary: usedFts } of results) {
+  // Print grouped per-supplier, in a fixed order, even though the searches
+  // above ran concurrently — keeps the log readable instead of interleaved.
+  for (const { slug, rows, total, ftsPrimary: usedFts, logLines } of results) {
+    for (const line of logLines) logInfo(line, 1);
+    logInfo(`${slug}: kept ${Math.min(rows.length, RESULTS_PER_SUPPLIER * 4)} of ${rows.length} ranked rows for the merge`, 1);
     totalBySupplier[slug] = total;
     if (usedFts) ftsPrimary = true;
     allRows.push(...rows.slice(0, Math.min(rows.length, RESULTS_PER_SUPPLIER * 4)));
   }
+  logInfo(`combined pool across suppliers: ${allRows.length} rows → balance per-supplier rerank → top ${RESULT_LIMIT}`);
 
   return { rows: allRows, totalBySupplier, ftsPrimary };
 }
@@ -718,10 +818,13 @@ async function rescueWithoutName(
 
 export async function retrieveProducts(filters: SearchFilters): Promise<SearchResult> {
   if (filters.supplier_slug) {
-    let { rows, total, ftsPrimary } = await buildHybridPool(filters);
+    let { rows, total, ftsPrimary, logLines } = await buildHybridPool(filters);
+    for (const line of logLines) logInfo(line);
     if (rows.length === 0) {
+      logInfo("hybrid pool empty — last resort: dropping name filter, FTS on that keyword alone");
       const supplierIdFilter = await resolveSupplierId(filters.supplier_slug);
       const rescued = await rescueWithoutName(filters, supplierIdFilter);
+      logInfo(`  → rescue found ${rescued.length} rows`);
       if (rescued.length > 0) {
         rows = rescued;
         total = rescued.length;
@@ -738,10 +841,14 @@ export async function retrieveProducts(filters: SearchFilters): Promise<SearchRe
   const grandTotal = Object.values(totalBySupplier).reduce((a, b) => a + b, 0);
 
   if (allRows.length === 0) {
+    logInfo("no supplier had matches — retrying once, globally, without a supplier split");
     const globalFilters = enrichFiltersWithKeywords(filters);
     const ftsRows = await runFtsSearchFiltered(globalFilters, null);
+    logInfo(`  global FTS: ${ftsRows.length} rows`);
     if (ftsRows.length === 0) {
+      logInfo("  still nothing — last resort: dropping name filter, FTS on that keyword alone");
       const rescued = await rescueWithoutName(filters, null);
+      logInfo(`  → rescue found ${rescued.length} rows`);
       if (rescued.length === 0) {
         return { rows: [], total: 0, fallback: true };
       }

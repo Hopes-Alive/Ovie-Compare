@@ -81,8 +81,10 @@ export async function* runBrainPipeline(input: BrainInput): AsyncGenerator<SseEv
 
   const filters = plannerResult.filters;
 
-  // ── Step 2: Retrieval (parallel SQL count + embed → cosine sort / FTS fallback) ─
-  logStepStart(2, TOTAL_STEPS, "Retrieval  (filter query + embed in parallel)");
+  // ── Step 2: Retrieval — structured filter + FTS + native pgvector, run in
+  // parallel per attempt, merged into one pool, then RRF-reranked. See
+  // buildHybridPool() in retrieval.ts for the per-arm breakdown logged below. ─
+  logStepStart(2, TOTAL_STEPS, "Retrieval  (structured + FTS + pgvector, in parallel)");
   const t2 = stepTimer();
   let searchResult;
   try {

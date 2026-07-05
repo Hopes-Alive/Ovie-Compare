@@ -243,9 +243,24 @@ never 13 near-duplicate cards for the same physical product.
 4. Absolute last resort: drop `name` entirely, FTS-only on the dropped keyword (`rescueWithoutName`)
 5. Planner asks clarifying question
 
-Note: the native pgvector arm (see above) already runs on every attempt regardless
-of `name`/`category`, so most cases that used to need a "vector-only" fallback are
-now caught on the very first attempt instead of needing to progressively widen.
+**Confidence gate on the widening loop:** because the native pgvector arm searches the
+whole table regardless of `name`/`category`, it almost always returns *something* —
+which meant the widening loop above used to stop after attempt 1 even when structured
+and FTS both found zero real matches, happily accepting whatever the vector arm's
+single closest (but possibly wrong-category) row was. `buildHybridPool` now only
+accepts a vector-only result immediately if its top hit's `similarity` clears
+`VECTOR_CONFIDENCE_THRESHOLD` (0.45); below that, with no structured/FTS corroboration,
+it's treated as "not a match yet" and the loop keeps widening (drop subcategory → drop
+category → drop stock_status) before falling back to the weak guess on the last
+attempt. This is what stops "nitrile gloves" from surfacing a root canal file merely
+because it was the least-dissimilar row in the whole catalog.
+
+Known remaining gap: this gate only fires when structured+FTS found **zero** rows. If
+structured/FTS return a few real but *low-relevance* rows (e.g. ILIKE `%mask%` matching
+a respirator clip's name, or ILIKE `%composite%` matching a composite-brush handle) and
+RRF's tie-break happens to rank one of those above the actual best match, the gate
+doesn't help — that's a ranking-quality problem, not a "no match" problem, and isn't
+addressed here.
 
 ---
 

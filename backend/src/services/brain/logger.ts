@@ -67,8 +67,14 @@ export function logStepError(step: number, total: number, err: unknown): void {
   console.log(`  ${RED}✖${RESET}  ${DIM}[${step}/${total}] error${RESET}  ${RED}${msg}${RESET}`);
 }
 
-export function logInfo(msg: string): void {
-  console.log(`  ${DIM}│${RESET} ${msg}`);
+/**
+ * Indented detail line under the current step (e.g. one retrieval arm's
+ * result, one widening attempt, one per-supplier sub-block). `depth` controls
+ * nesting so multi-attempt / multi-supplier flows read as a tree instead of
+ * a flat wall of text.
+ */
+export function logInfo(msg: string, depth: number = 0): void {
+  console.log(`  ${DIM}│${RESET}  ${"  ".repeat(depth)}${msg}`);
 }
 
 /** Convenience: start a step timer, returns a done() callback */
