@@ -120,13 +120,20 @@ function toProductRow(raw: Record<string, unknown>): ProductRow {
 // Primary: filter query
 // ---------------------------------------------------------------------------
 
+// Supplier slug → id never changes at runtime (only 2 MVP suppliers) — cache
+// per process instead of round-tripping to the DB on every attempt/arm. Both
+// success and failure (null) are cached so a bad slug doesn't retry forever.
+const supplierIdCache = new Map<string, Promise<string | null>>();
+
 async function resolveSupplierId(slug: string): Promise<string | null> {
-  const { data: sup } = await supabase
-    .from("suppliers")
-    .select("id")
-    .eq("slug", slug)
-    .single();
-  return (sup as { id: string } | null)?.id ?? null;
+  let cached = supplierIdCache.get(slug);
+  if (!cached) {
+    cached = (supabase.from("suppliers").select("id").eq("slug", slug).single() as AnyQuery).then(
+      (res: { data: { id: string } | null }) => res.data?.id ?? null,
+    );
+    supplierIdCache.set(slug, cached);
+  }
+  return cached;
 }
 
 async function runFilterQuery(filters: SearchFilters): Promise<{
@@ -139,22 +146,12 @@ async function runFilterQuery(filters: SearchFilters): Promise<{
     supplierIdFilter = await resolveSupplierId(filters.supplier_slug);
   }
 
-  // Count query (fast — no embedding column)
-  let countQuery: AnyQuery = supabase
-    .from("supplier_products")
-    .select("*", { count: "exact", head: true })
-    .eq("is_active", true)
-    .not("embedding", "is", null);
-
-  countQuery = applyColumnFilters(countQuery, filters, supplierIdFilter);
-  const { count } = await countQuery;
-  const total = (count as number) ?? 0;
-
-  if (total === 0) return { rows: [], total: 0 };
-
+  // Single round trip for both the matched-row data AND the exact total count —
+  // PostgREST returns `count` in the response header alongside `data` when asked,
+  // so there's no need for a second query that re-scans the same ILIKE filters.
   let dataQuery: AnyQuery = supabase
     .from("supplier_products")
-    .select(PRODUCT_SELECT)
+    .select(PRODUCT_SELECT, { count: "exact" })
     .eq("is_active", true)
     .not("embedding", "is", null)
     .limit(FILTER_POOL_LIMIT);
@@ -168,8 +165,11 @@ async function runFilterQuery(filters: SearchFilters): Promise<{
     dataQuery = dataQuery.order("price", { ascending: false });
   }
 
-  const { data, error } = await dataQuery;
+  const { data, count, error } = await dataQuery;
   if (error) throw new Error(`Filter query failed: ${error.message}`);
+
+  const total = (count as number) ?? 0;
+  if (total === 0) return { rows: [], total: 0 };
 
   return {
     rows: ((data as unknown[]) ?? []).map((r) => toProductRow(r as Record<string, unknown>)),
@@ -388,7 +388,12 @@ async function buildHybridPool(filters: SearchFilters, label?: string): Promise<
   // attempt actually changes one of those hard filters (only the stock_status-drop
   // attempt does). Embed once and cache the RPC call per distinct hard-filter shape
   // instead of repeating an identical ~1s embed+search on every widening attempt.
-  const queryVector = await embedText(filters.rewritten_query);
+  //
+  // Kick off the embedding call now but don't await it yet — it doesn't depend on
+  // anything the filter/FTS arms need, so it can run on the wire *while* the first
+  // attempt's structured + FTS queries are also in flight, instead of serializing
+  // ~1s of embedding time in front of them.
+  const queryVectorPromise = embedText(filters.rewritten_query);
   const vectorCache = new Map<string, Promise<ProductRow[]>>();
   function vectorSearchCached(f: SearchFilters): Promise<ProductRow[]> {
     const key = JSON.stringify([
@@ -400,7 +405,7 @@ async function buildHybridPool(filters: SearchFilters, label?: string): Promise<
     ]);
     let cached = vectorCache.get(key);
     if (!cached) {
-      cached = runVectorSearch(f, queryVector, VECTOR_POOL_LIMIT);
+      cached = queryVectorPromise.then((vec) => runVectorSearch(f, vec, VECTOR_POOL_LIMIT));
       vectorCache.set(key, cached);
     }
     return cached;

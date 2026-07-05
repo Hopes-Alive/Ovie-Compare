@@ -17,6 +17,7 @@ const FILES = [
   "005_ai_read_price_source.sql",
   "006_product_variant_label.sql",
   "007_vector_search_columns.sql",
+  "008_trgm_indexes.sql",
 ];
 
 async function main() {
